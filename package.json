@@ -1,0 +1,36 @@
+{
+  "name": "conductor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-LLM orchestration framework for autonomous agent coordination",
+  "author": "Habitus Networks",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/habitusnet/conductor.git"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "npm@11.0.0"
+}
