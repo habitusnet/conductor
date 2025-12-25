@@ -169,7 +169,14 @@ export class ConflictDetector {
         return { safe: true }; // No git history, safe to create
       }
 
-      const [lastModifier, lastModifiedStr] = stdout.trim().split('|');
+      const parts = stdout.trim().split('|');
+      const lastModifier = parts[0];
+      const lastModifiedStr = parts[1];
+
+      if (!lastModifier || !lastModifiedStr) {
+        return { safe: true }; // Invalid format, assume safe
+      }
+
       const lastModified = new Date(lastModifiedStr);
       const windowMs = windowMinutes * 60 * 1000;
       const isRecent = Date.now() - lastModified.getTime() < windowMs;

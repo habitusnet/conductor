@@ -50,6 +50,7 @@ program
     const project = store.createProject({
       name,
       rootPath: process.cwd(),
+      defaultBranch: 'main',
       conflictStrategy: options.strategy as ConflictStrategy,
       budget: options.budget
         ? { total: parseFloat(options.budget), spent: 0, currency: 'USD', alertThreshold: 80 }

@@ -406,7 +406,7 @@ export class SQLiteStateStore {
       params.push(filters.assignedTo);
     }
 
-    query += ' ORDER BY CASE priority WHEN "critical" THEN 1 WHEN "high" THEN 2 WHEN "medium" THEN 3 ELSE 4 END, created_at';
+    query += " ORDER BY CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at";
 
     const rows = this.db.prepare(query).all(...params) as Record<string, unknown>[];
     return rows.map((row) => this.rowToTask(row));

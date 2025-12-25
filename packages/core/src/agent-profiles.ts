@@ -136,19 +136,24 @@ export function createAgentProfile(
   id: string,
   overrides: Partial<AgentProfile> = {}
 ): AgentProfile {
+  // Filter out undefined values from overrides
+  const cleanOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([, v]) => v !== undefined)
+  ) as Partial<AgentProfile>;
+
   const base = DEFAULT_AGENT_PROFILES[id];
 
   if (base) {
-    return { ...base, ...overrides, id };
+    return { ...base, ...cleanOverrides, id };
   }
 
   return {
     id,
-    name: overrides.name || id,
-    capabilities: overrides.capabilities || [],
-    costPerToken: overrides.costPerToken || { input: 0, output: 0 },
-    status: overrides.status || 'idle',
-    ...overrides,
+    name: cleanOverrides.name || id,
+    capabilities: cleanOverrides.capabilities || [],
+    costPerToken: cleanOverrides.costPerToken || { input: 0, output: 0 },
+    status: cleanOverrides.status || 'idle',
+    ...cleanOverrides,
   };
 }
 
