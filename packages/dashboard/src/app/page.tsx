@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { ActionForwardPanel } from '@/components/ActionForwardPanel';
 
 interface ProjectStatus {
   project: { id: string; name: string; conflictStrategy: string } | null;
@@ -35,13 +36,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000); // Refresh every 5s
-    return () => clearInterval(interval);
-  }, []);
-
-  async function fetchStatus() {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/project');
       const data = await res.json();
@@ -56,7 +51,13 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000); // Refresh every 5s
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
 
   if (loading) {
     return (
@@ -113,10 +114,13 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Quick Actions */}
+      {/* Action Forward Panel */}
+      <ActionForwardPanel onRefresh={fetchStatus} />
+
+      {/* Navigation Links */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Quick Actions
+          Navigation
         </h2>
         <div className="flex flex-wrap gap-4">
           <a
