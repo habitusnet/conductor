@@ -2,10 +2,33 @@ import { SQLiteStateStore } from '@conductor/state';
 import { D1StateStore } from './d1-store';
 import type { D1Database } from '@cloudflare/workers-types';
 
-// Determine if we're running on Cloudflare
-const isCloudflare = typeof globalThis !== 'undefined' &&
-  'caches' in globalThis &&
-  process.env.CONDUCTOR_ENV === 'cloudflare';
+// Environment detection
+export type Platform = 'local' | 'cloudflare' | 'firebase';
+
+/**
+ * Detect the current platform based on environment
+ */
+export function detectPlatform(): Platform {
+  // Explicit platform from environment
+  const explicitPlatform = process.env.CONDUCTOR_PLATFORM;
+  if (explicitPlatform === 'cloudflare') return 'cloudflare';
+  if (explicitPlatform === 'firebase') return 'firebase';
+
+  // Auto-detect Cloudflare
+  if (process.env.CONDUCTOR_ENV === 'cloudflare') return 'cloudflare';
+
+  // Auto-detect Firebase
+  if (
+    process.env.FIREBASE_CONFIG ||
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    process.env.GCLOUD_PROJECT ||
+    process.env.K_SERVICE // Cloud Run/Functions
+  ) {
+    return 'firebase';
+  }
+
+  return 'local';
+}
 
 // Local SQLite store singleton
 let localStore: SQLiteStateStore | null = null;
