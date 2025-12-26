@@ -1,40 +1,52 @@
 # Conductor
 
-**Multi-LLM Orchestration Platform for Autonomous Agent Coordination**
+**CLI-First Multi-LLM Orchestration for Autonomous Agent Coordination**
 
-Conductor is a project-agnostic orchestration platform that enables multiple LLM agents (Claude, Gemini, GPT-4, Codex, etc.) to work autonomously and collaboratively on shared codebases.
+Conductor enables multiple subscription-based LLM CLI tools (Claude Code, Codex CLI, Gemini CLI, OpenCode, etc.) to work autonomously and collaboratively on shared codebases via MCP (Model Context Protocol).
 
 ## Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                      CONDUCTOR PLATFORM                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
-│  │Organization │───▶│   Project   │───▶│    Agent    │             │
-│  │  (Account)  │    │  (Repo Link)│    │  Instances  │             │
-│  └─────────────┘    └─────────────┘    └─────────────┘             │
-│         │                  │                  │                     │
-│         ▼                  ▼                  ▼                     │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
-│  │   Billing   │    │   Custom    │    │  Heartbeat  │             │
-│  │  & Quotas   │    │Instructions │    │  & Status   │             │
-│  └─────────────┘    └─────────────┘    └─────────────┘             │
-│                                                                      │
-├─────────────────────────────────────────────────────────────────────┤
-│  CONNECTORS                                                          │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐            │
-│  │ GitHub │ │ Claude │ │ Gemini │ │ OpenAI │ │Webhooks│            │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘            │
-├─────────────────────────────────────────────────────────────────────┤
-│  DASHBOARD                                                           │
-│  • Portfolio view (all projects)                                    │
-│  • Project drill-down (tasks, agents, costs)                        │
-│  • Agent performance & utilization                                  │
-│  • Conflict resolution queue                                        │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CONSOLE HOST / WORKSTATION                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│   │ Claude Code │  │ Codex CLI   │  │ Gemini CLI  │  │ OpenCode    │  ...  │
+│   │   (OAuth)   │  │   (OAuth)   │  │   (OAuth)   │  │   (OAuth)   │       │
+│   └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │
+│          └─────────────────┴────────────────┴─────────────────┘             │
+│                                    │ MCP                                     │
+│                          ┌─────────▼─────────┐                              │
+│                          │    CONDUCTOR      │                              │
+│                          │    MCP SERVER     │                              │
+│                          │  ┌─────────────┐  │                              │
+│                          │  │ Task Queue  │  │                              │
+│                          │  │ State Store │  │                              │
+│                          │  │ File Locks  │  │                              │
+│                          │  │ Cost Track  │  │                              │
+│                          │  └─────────────┘  │                              │
+│                          └─────────┬─────────┘                              │
+│                                    │                                         │
+│                          ┌─────────▼─────────┐                              │
+│                          │  OVERSIGHT AGENT  │◄── Monitors CLI outputs      │
+│                          │  (CLI-based too)  │    Handles escalations       │
+│                          └─────────┬─────────┘    Remote orchestration      │
+│                                    │                                         │
+│                          ┌─────────▼─────────┐                              │
+│                          │   API FALLBACK    │◄── Emergency only            │
+│                          │   (When needed)   │    Coordination recovery     │
+│                          └───────────────────┘                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## CLI-First Philosophy
+
+**Primary**: Subscription-based CLI tools (Claude Code, Codex, Gemini CLI) connected via MCP
+**Secondary**: Oversight agent monitors and coordinates
+**Fallback**: API orchestration for failures/emergencies only
+
+This is NOT an API orchestrator. Agents are full CLI sessions authenticated via OAuth to their respective subscriptions.
 
 ## Key Features
 
