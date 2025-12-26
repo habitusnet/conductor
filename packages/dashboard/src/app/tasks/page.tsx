@@ -1,75 +1,74 @@
-// Mock data - will be replaced with API calls
-const mockTasks = [
-  {
-    id: '1',
-    title: 'Implement user authentication',
-    description: 'Add JWT-based auth with refresh tokens',
-    status: 'in_progress' as const,
-    priority: 'high' as const,
-    assignedTo: 'claude',
-    files: ['src/auth/login.ts', 'src/auth/middleware.ts'],
-    tags: ['auth', 'security'],
-    estimatedTokens: 50000,
-    actualTokens: 32000,
-    createdAt: new Date('2024-01-15'),
-  },
-  {
-    id: '2',
-    title: 'Fix database connection pooling',
-    description: 'Connection pool exhaustion under load',
-    status: 'pending' as const,
-    priority: 'critical' as const,
-    assignedTo: undefined,
-    files: ['src/db/pool.ts'],
-    tags: ['database', 'performance'],
-    estimatedTokens: 20000,
-    createdAt: new Date('2024-01-16'),
-  },
-  {
-    id: '3',
-    title: 'Add unit tests for API endpoints',
-    description: 'Increase test coverage to 80%',
-    status: 'completed' as const,
-    priority: 'medium' as const,
-    assignedTo: 'gemini',
-    files: ['tests/api/*.test.ts'],
-    tags: ['testing'],
-    estimatedTokens: 30000,
-    actualTokens: 28500,
-    createdAt: new Date('2024-01-14'),
-    completedAt: new Date('2024-01-15'),
-  },
-  {
-    id: '4',
-    title: 'Refactor logging module',
-    description: 'Switch to structured JSON logging',
-    status: 'blocked' as const,
-    priority: 'low' as const,
-    assignedTo: 'codex',
-    files: ['src/utils/logger.ts'],
-    tags: ['refactor', 'observability'],
-    estimatedTokens: 15000,
-    createdAt: new Date('2024-01-16'),
-    blockedBy: ['2'],
-  },
-  {
-    id: '5',
-    title: 'Update dependencies',
-    description: 'Security patches for npm packages',
-    status: 'claimed' as const,
-    priority: 'high' as const,
-    assignedTo: 'claude',
-    files: ['package.json', 'package-lock.json'],
-    tags: ['maintenance', 'security'],
-    estimatedTokens: 10000,
-    createdAt: new Date('2024-01-17'),
-  },
-];
+'use client';
+
+import { useEffect, useState } from 'react';
 
 type TaskStatus = 'pending' | 'claimed' | 'in_progress' | 'completed' | 'failed' | 'blocked' | 'cancelled';
 type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 
+interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignedTo?: string;
+  files: string[];
+  tags: string[];
+  estimatedTokens?: number;
+  actualTokens?: number;
+  createdAt: string;
+  completedAt?: string;
+  blockedBy?: string[];
+}
+
 export default function TasksPage() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>('all');
+
+  useEffect(() => {
+    fetchTasks();
+    const interval = setInterval(fetchTasks, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchTasks() {
+    try {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setTasks(data.tasks || []);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to fetch tasks');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filteredTasks = filter === 'all'
+    ? tasks
+    : tasks.filter(t => t.status === filter);
+
+  const statusCounts = {
+    pending: tasks.filter(t => t.status === 'pending').length,
+    in_progress: tasks.filter(t => t.status === 'in_progress').length,
+    completed: tasks.filter(t => t.status === 'completed').length,
+    blocked: tasks.filter(t => t.status === 'blocked').length,
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-conductor-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -79,120 +78,138 @@ export default function TasksPage() {
             Manage and monitor task assignments
           </p>
         </div>
-        <button className="px-4 py-2 bg-conductor-600 text-white rounded-lg hover:bg-conductor-700 transition-colors">
-          + New Task
-        </button>
       </div>
+
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-400">{error}</p>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <FilterButton label="All" active />
-        <FilterButton label="Pending" count={1} />
-        <FilterButton label="In Progress" count={1} />
-        <FilterButton label="Completed" count={1} />
-        <FilterButton label="Blocked" count={1} />
+        <FilterButton label="All" count={tasks.length} active={filter === 'all'} onClick={() => setFilter('all')} />
+        <FilterButton label="Pending" count={statusCounts.pending} active={filter === 'pending'} onClick={() => setFilter('pending')} />
+        <FilterButton label="In Progress" count={statusCounts.in_progress} active={filter === 'in_progress'} onClick={() => setFilter('in_progress')} />
+        <FilterButton label="Completed" count={statusCounts.completed} active={filter === 'completed'} onClick={() => setFilter('completed')} />
+        <FilterButton label="Blocked" count={statusCounts.blocked} active={filter === 'blocked'} onClick={() => setFilter('blocked')} />
       </div>
 
       {/* Task List */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead className="bg-gray-50 dark:bg-gray-900">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Task
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Priority
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Agent
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Tokens
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Files
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {mockTasks.map((task) => (
-              <tr key={task.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">
-                    {task.title}
-                  </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    {task.description}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {task.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <StatusBadge status={task.status} />
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <PriorityBadge priority={task.priority} />
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {task.assignedTo ? (
-                    <AgentBadge agentId={task.assignedTo} />
-                  ) : (
-                    <span className="text-sm text-gray-400 dark:text-gray-500 italic">
-                      Unassigned
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {task.actualTokens ? (
-                    <span>
-                      {(task.actualTokens / 1000).toFixed(1)}k
-                      <span className="text-gray-400 dark:text-gray-500">
-                        {' '}/ {(task.estimatedTokens! / 1000).toFixed(1)}k
-                      </span>
-                    </span>
-                  ) : task.estimatedTokens ? (
-                    <span className="text-gray-400 dark:text-gray-500">
-                      ~{(task.estimatedTokens / 1000).toFixed(1)}k
-                    </span>
-                  ) : (
-                    '-'
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {task.files.length} file{task.files.length !== 1 ? 's' : ''}
-                </td>
+      {filteredTasks.length > 0 ? (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-900">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Task
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Priority
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Agent
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Tokens
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Files
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {filteredTasks.map((task) => (
+                <tr key={task.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  <td className="px-6 py-4">
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">
+                      {task.title}
+                    </div>
+                    {task.description && (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {task.description}
+                      </div>
+                    )}
+                    {task.tags.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {task.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <StatusBadge status={task.status} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <PriorityBadge priority={task.priority} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {task.assignedTo ? (
+                      <AgentBadge agentId={task.assignedTo} />
+                    ) : (
+                      <span className="text-sm text-gray-400 dark:text-gray-500 italic">
+                        Unassigned
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    {task.actualTokens ? (
+                      <span>
+                        {(task.actualTokens / 1000).toFixed(1)}k
+                        {task.estimatedTokens && (
+                          <span className="text-gray-400 dark:text-gray-500">
+                            {' '}/ {(task.estimatedTokens / 1000).toFixed(1)}k
+                          </span>
+                        )}
+                      </span>
+                    ) : task.estimatedTokens ? (
+                      <span className="text-gray-400 dark:text-gray-500">
+                        ~{(task.estimatedTokens / 1000).toFixed(1)}k
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    {task.files.length} file{task.files.length !== 1 ? 's' : ''}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">
+            {filter === 'all' ? 'No tasks found. Create tasks using the CLI.' : `No ${filter.replace('_', ' ')} tasks.`}
+          </p>
+        </div>
+      )}
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total Tasks" value={mockTasks.length} />
-        <MiniStat label="In Progress" value={mockTasks.filter(t => t.status === 'in_progress').length} />
-        <MiniStat label="Completed" value={mockTasks.filter(t => t.status === 'completed').length} />
-        <MiniStat label="Blocked" value={mockTasks.filter(t => t.status === 'blocked').length} />
+        <MiniStat label="Total Tasks" value={tasks.length} />
+        <MiniStat label="In Progress" value={statusCounts.in_progress} />
+        <MiniStat label="Completed" value={statusCounts.completed} />
+        <MiniStat label="Blocked" value={statusCounts.blocked} />
       </div>
     </div>
   );
 }
 
-function FilterButton({ label, count, active }: { label: string; count?: number; active?: boolean }) {
+function FilterButton({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
   return (
     <button
+      onClick={onClick}
       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
         active
           ? 'bg-conductor-600 text-white'
@@ -200,11 +217,9 @@ function FilterButton({ label, count, active }: { label: string; count?: number;
       }`}
     >
       {label}
-      {count !== undefined && (
-        <span className={`ml-1.5 ${active ? 'text-conductor-200' : 'text-gray-400 dark:text-gray-500'}`}>
-          {count}
-        </span>
-      )}
+      <span className={`ml-1.5 ${active ? 'text-conductor-200' : 'text-gray-400 dark:text-gray-500'}`}>
+        {count}
+      </span>
     </button>
   );
 }

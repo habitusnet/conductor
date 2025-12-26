@@ -1,47 +1,84 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-// Mock data - will be replaced with API calls
-const mockCostEvents = [
-  { id: '1', agentId: 'claude', model: 'claude-3-opus', taskId: 'task-1', tokensInput: 15000, tokensOutput: 5000, cost: 0.60, createdAt: new Date('2024-01-17T10:30:00') },
-  { id: '2', agentId: 'gemini', model: 'gemini-pro', taskId: 'task-2', tokensInput: 25000, tokensOutput: 8000, cost: 0.01, createdAt: new Date('2024-01-17T09:15:00') },
-  { id: '3', agentId: 'claude', model: 'claude-3-opus', taskId: 'task-3', tokensInput: 8000, tokensOutput: 3000, cost: 0.35, createdAt: new Date('2024-01-17T08:45:00') },
-  { id: '4', agentId: 'codex', model: 'gpt-4-turbo', taskId: 'task-4', tokensInput: 12000, tokensOutput: 4000, cost: 0.24, createdAt: new Date('2024-01-16T16:20:00') },
-  { id: '5', agentId: 'claude', model: 'claude-3-opus', taskId: 'task-5', tokensInput: 20000, tokensOutput: 7000, cost: 0.83, createdAt: new Date('2024-01-16T14:10:00') },
-  { id: '6', agentId: 'gemini', model: 'gemini-pro', taskId: 'task-6', tokensInput: 30000, tokensOutput: 10000, cost: 0.01, createdAt: new Date('2024-01-16T11:30:00') },
-  { id: '7', agentId: 'claude', model: 'claude-3-opus', taskId: 'task-7', tokensInput: 5000, tokensOutput: 2000, cost: 0.23, createdAt: new Date('2024-01-15T15:45:00') },
-  { id: '8', agentId: 'codex', model: 'gpt-4-turbo', taskId: 'task-8', tokensInput: 18000, tokensOutput: 6000, cost: 0.36, createdAt: new Date('2024-01-15T10:20:00') },
-];
+interface CostEvent {
+  id: string;
+  agentId: string;
+  model: string;
+  taskId: string;
+  tokensInput: number;
+  tokensOutput: number;
+  cost: number;
+  createdAt: string;
+}
 
-const mockBudget = {
-  total: 50.00,
-  spent: 12.47,
-  alertThreshold: 80,
-};
+interface AgentUsage {
+  agentId: string;
+  cost: number;
+  tokens: number;
+  percentage: number;
+}
 
-const mockUsageByAgent = [
-  { agentId: 'claude', cost: 8.50, tokens: 450000, percentage: 68 },
-  { agentId: 'gemini', cost: 0.25, tokens: 500000, percentage: 2 },
-  { agentId: 'codex', cost: 2.80, tokens: 140000, percentage: 22 },
-  { agentId: 'gpt4', cost: 0.92, tokens: 46000, percentage: 8 },
-];
+interface DailySpend {
+  date: string;
+  amount: number;
+}
 
-const mockDailySpend = [
-  { date: '2024-01-11', amount: 1.20 },
-  { date: '2024-01-12', amount: 0.85 },
-  { date: '2024-01-13', amount: 2.10 },
-  { date: '2024-01-14', amount: 1.75 },
-  { date: '2024-01-15', amount: 0.59 },
-  { date: '2024-01-16', amount: 1.08 },
-  { date: '2024-01-17', amount: 0.96 },
-];
+interface Budget {
+  total: number;
+  spent: number;
+  alertThreshold: number;
+}
+
+interface CostsData {
+  events: CostEvent[];
+  budget: Budget | null;
+  byAgent: AgentUsage[];
+  dailySpend: DailySpend[];
+  totalSpend: number;
+}
 
 export default function CostsPage() {
+  const [data, setData] = useState<CostsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | 'all'>('7d');
 
-  const percentUsed = (mockBudget.spent / mockBudget.total) * 100;
-  const isNearLimit = percentUsed >= mockBudget.alertThreshold;
+  useEffect(() => {
+    fetchCosts();
+    const interval = setInterval(fetchCosts, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchCosts() {
+    try {
+      const res = await fetch('/api/costs');
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+      } else {
+        setData(json);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to fetch costs');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-conductor-600"></div>
+      </div>
+    );
+  }
+
+  const budget = data?.budget;
+  const percentUsed = budget ? (budget.spent / budget.total) * 100 : 0;
+  const isNearLimit = budget ? percentUsed >= budget.alertThreshold : false;
 
   return (
     <div className="space-y-6">
@@ -59,6 +96,12 @@ export default function CostsPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
       {/* Budget Overview */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <div className="flex justify-between items-start mb-4">
@@ -71,41 +114,55 @@ export default function CostsPage() {
           </button>
         </div>
 
-        <div className="flex items-end gap-4 mb-4">
-          <div className="text-4xl font-bold text-gray-900 dark:text-white">
-            ${mockBudget.spent.toFixed(2)}
-          </div>
-          <div className="text-lg text-gray-500 dark:text-gray-400 mb-1">
-            / ${mockBudget.total.toFixed(2)}
-          </div>
-        </div>
+        {budget ? (
+          <>
+            <div className="flex items-end gap-4 mb-4">
+              <div className="text-4xl font-bold text-gray-900 dark:text-white">
+                ${budget.spent.toFixed(2)}
+              </div>
+              <div className="text-lg text-gray-500 dark:text-gray-400 mb-1">
+                / ${budget.total.toFixed(2)}
+              </div>
+            </div>
 
-        <div className="relative h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div
-            className={`absolute inset-y-0 left-0 rounded-full transition-all ${
-              isNearLimit ? 'bg-red-500' : 'bg-conductor-500'
-            }`}
-            style={{ width: `${Math.min(percentUsed, 100)}%` }}
-          />
-          <div
-            className="absolute inset-y-0 border-r-2 border-dashed border-orange-400"
-            style={{ left: `${mockBudget.alertThreshold}%` }}
-          />
-        </div>
+            <div className="relative h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className={`absolute inset-y-0 left-0 rounded-full transition-all ${
+                  isNearLimit ? 'bg-red-500' : 'bg-conductor-500'
+                }`}
+                style={{ width: `${Math.min(percentUsed, 100)}%` }}
+              />
+              <div
+                className="absolute inset-y-0 border-r-2 border-dashed border-orange-400"
+                style={{ left: `${budget.alertThreshold}%` }}
+              />
+            </div>
 
-        <div className="flex justify-between mt-2 text-sm">
-          <span className={isNearLimit ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-400'}>
-            {percentUsed.toFixed(1)}% used
-          </span>
-          <span className="text-gray-500 dark:text-gray-400">
-            ${(mockBudget.total - mockBudget.spent).toFixed(2)} remaining
-          </span>
-        </div>
+            <div className="flex justify-between mt-2 text-sm">
+              <span className={isNearLimit ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-600 dark:text-gray-400'}>
+                {percentUsed.toFixed(1)}% used
+              </span>
+              <span className="text-gray-500 dark:text-gray-400">
+                ${(budget.total - budget.spent).toFixed(2)} remaining
+              </span>
+            </div>
 
-        {isNearLimit && (
-          <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-            <p className="text-sm text-red-700 dark:text-red-400">
-              Warning: You&apos;ve exceeded {mockBudget.alertThreshold}% of your budget. Consider reviewing task assignments.
+            {isNearLimit && (
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-700 dark:text-red-400">
+                  Warning: You&apos;ve exceeded {budget.alertThreshold}% of your budget. Consider reviewing task assignments.
+                </p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-4xl font-bold text-gray-900 dark:text-white mb-2">
+              ${data?.totalSpend.toFixed(2) || '0.00'}
+            </div>
+            <p className="text-gray-500 dark:text-gray-400">Total spent (no budget set)</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
+              Set a budget using the CLI: <code className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">conductor budget --set 100</code>
             </p>
           </div>
         )}
@@ -116,34 +173,46 @@ export default function CostsPage() {
         {/* Daily Spend Chart */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Daily Spending</h2>
-          <div className="h-48 flex items-end gap-2">
-            {mockDailySpend.map((day, i) => {
-              const maxAmount = Math.max(...mockDailySpend.map(d => d.amount));
-              const height = (day.amount / maxAmount) * 100;
-              return (
-                <div key={day.date} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">${day.amount.toFixed(2)}</div>
-                  <div
-                    className="w-full bg-conductor-500 rounded-t transition-all hover:bg-conductor-600"
-                    style={{ height: `${height}%`, minHeight: '8px' }}
-                  />
-                  <div className="text-xs text-gray-400 dark:text-gray-500">
-                    {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+          {data?.dailySpend && data.dailySpend.length > 0 ? (
+            <div className="h-48 flex items-end gap-2">
+              {data.dailySpend.map((day) => {
+                const maxAmount = Math.max(...data.dailySpend.map(d => d.amount), 0.01);
+                const height = (day.amount / maxAmount) * 100;
+                return (
+                  <div key={day.date} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">${day.amount.toFixed(2)}</div>
+                    <div
+                      className="w-full bg-conductor-500 rounded-t transition-all hover:bg-conductor-600"
+                      style={{ height: `${height}%`, minHeight: '8px' }}
+                    />
+                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                      {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="h-48 flex items-center justify-center text-gray-500 dark:text-gray-400">
+              No spending data available
+            </div>
+          )}
         </div>
 
         {/* Usage by Agent */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Usage by Agent</h2>
-          <div className="space-y-4">
-            {mockUsageByAgent.map((agent) => (
-              <AgentUsageRow key={agent.agentId} {...agent} />
-            ))}
-          </div>
+          {data?.byAgent && data.byAgent.length > 0 ? (
+            <div className="space-y-4">
+              {data.byAgent.map((agent) => (
+                <AgentUsageRow key={agent.agentId} {...agent} />
+              ))}
+            </div>
+          ) : (
+            <div className="h-32 flex items-center justify-center text-gray-500 dark:text-gray-400">
+              No agent usage data available
+            </div>
+          )}
         </div>
       </div>
 
@@ -152,50 +221,56 @@ export default function CostsPage() {
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Usage</h2>
         </div>
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead className="bg-gray-50 dark:bg-gray-900">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Time
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Agent
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Model
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Tokens
-              </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                Cost
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {mockCostEvents.map((event) => (
-              <tr key={event.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  {formatDateTime(event.createdAt)}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <AgentBadge agentId={event.agentId} />
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                  {event.model}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                  <span className="text-green-600 dark:text-green-400">{(event.tokensInput / 1000).toFixed(1)}k</span>
-                  {' / '}
-                  <span className="text-blue-600 dark:text-blue-400">{(event.tokensOutput / 1000).toFixed(1)}k</span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white text-right">
-                  ${event.cost.toFixed(2)}
-                </td>
+        {data?.events && data.events.length > 0 ? (
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-900">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Time
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Agent
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Model
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Tokens
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Cost
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {data.events.map((event) => (
+                <tr key={event.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    {formatDateTime(new Date(event.createdAt))}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <AgentBadge agentId={event.agentId} />
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
+                    {event.model}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    <span className="text-green-600 dark:text-green-400">{(event.tokensInput / 1000).toFixed(1)}k</span>
+                    {' / '}
+                    <span className="text-blue-600 dark:text-blue-400">{(event.tokensOutput / 1000).toFixed(1)}k</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white text-right">
+                    ${event.cost.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+            No cost events recorded yet
+          </div>
+        )}
       </div>
 
       {/* Cost Tips */}

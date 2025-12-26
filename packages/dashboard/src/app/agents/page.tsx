@@ -1,65 +1,62 @@
-// Mock data - will be replaced with API calls
-const mockAgents = [
-  {
-    id: 'claude',
-    name: 'Claude',
-    provider: 'anthropic' as const,
-    model: 'claude-3-opus',
-    status: 'working' as const,
-    capabilities: ['code-generation', 'code-review', 'debugging', 'documentation'],
-    costPerToken: { input: 0.015, output: 0.075 },
-    currentTask: 'Implement user authentication',
-    tokensUsed: 125000,
-    tasksCompleted: 12,
-    lastHeartbeat: new Date(Date.now() - 30000), // 30 seconds ago
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini',
-    provider: 'google' as const,
-    model: 'gemini-pro',
-    status: 'idle' as const,
-    capabilities: ['code-generation', 'testing', 'analysis'],
-    costPerToken: { input: 0.00025, output: 0.0005 },
-    currentTask: undefined,
-    tokensUsed: 89000,
-    tasksCompleted: 8,
-    lastHeartbeat: new Date(Date.now() - 60000), // 1 minute ago
-  },
-  {
-    id: 'codex',
-    name: 'Codex',
-    provider: 'openai' as const,
-    model: 'gpt-4-turbo',
-    status: 'blocked' as const,
-    capabilities: ['code-generation', 'refactoring'],
-    costPerToken: { input: 0.01, output: 0.03 },
-    currentTask: 'Refactor logging module',
-    tokensUsed: 45000,
-    tasksCompleted: 5,
-    lastHeartbeat: new Date(Date.now() - 120000), // 2 minutes ago
-  },
-  {
-    id: 'gpt4',
-    name: 'GPT-4',
-    provider: 'openai' as const,
-    model: 'gpt-4o',
-    status: 'offline' as const,
-    capabilities: ['code-generation', 'architecture', 'documentation'],
-    costPerToken: { input: 0.005, output: 0.015 },
-    currentTask: undefined,
-    tokensUsed: 0,
-    tasksCompleted: 0,
-    lastHeartbeat: new Date(Date.now() - 3600000), // 1 hour ago
-  },
-];
+'use client';
+
+import { useEffect, useState } from 'react';
 
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'offline';
 type Provider = 'anthropic' | 'google' | 'openai' | 'meta' | 'custom';
 
+interface Agent {
+  id: string;
+  name: string;
+  provider: Provider;
+  model: string;
+  status: AgentStatus;
+  capabilities: string[];
+  costPerToken: { input: number; output: number };
+  currentTaskId?: string;
+  totalSpend: number;
+  metadata?: Record<string, unknown>;
+  lastHeartbeat?: string;
+}
+
 export default function AgentsPage() {
-  const activeAgents = mockAgents.filter(a => a.status !== 'offline').length;
-  const workingAgents = mockAgents.filter(a => a.status === 'working').length;
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAgents();
+    const interval = setInterval(fetchAgents, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchAgents() {
+    try {
+      const res = await fetch('/api/agents');
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setAgents(data.agents || []);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to fetch agents');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const activeAgents = agents.filter(a => a.status !== 'offline').length;
+  const workingAgents = agents.filter(a => a.status === 'working').length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-conductor-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -75,20 +72,34 @@ export default function AgentsPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
       {/* Status Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatusCard label="Total Agents" value={mockAgents.length} color="blue" />
+        <StatusCard label="Total Agents" value={agents.length} color="blue" />
         <StatusCard label="Active" value={activeAgents} color="green" />
         <StatusCard label="Working" value={workingAgents} color="yellow" />
-        <StatusCard label="Offline" value={mockAgents.length - activeAgents} color="gray" />
+        <StatusCard label="Offline" value={agents.length - activeAgents} color="gray" />
       </div>
 
       {/* Agent Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {mockAgents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
-        ))}
-      </div>
+      {agents.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} />
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">
+            No agents registered. Connect an agent using the MCP server.
+          </p>
+        </div>
+      )}
 
       {/* Instructions */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6">
@@ -127,20 +138,6 @@ function StatusCard({ label, value, color }: { label: string; value: number; col
   );
 }
 
-interface Agent {
-  id: string;
-  name: string;
-  provider: Provider;
-  model: string;
-  status: AgentStatus;
-  capabilities: string[];
-  costPerToken: { input: number; output: number };
-  currentTask?: string;
-  tokensUsed: number;
-  tasksCompleted: number;
-  lastHeartbeat: Date;
-}
-
 function AgentCard({ agent }: { agent: Agent }) {
   const statusStyles: Record<AgentStatus, { bg: string; text: string; dot: string }> = {
     idle: { bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-700 dark:text-gray-300', dot: 'bg-gray-500' },
@@ -158,7 +155,9 @@ function AgentCard({ agent }: { agent: Agent }) {
   };
 
   const style = statusStyles[agent.status];
-  const timeSinceHeartbeat = Math.floor((Date.now() - agent.lastHeartbeat.getTime()) / 1000);
+  const timeSinceHeartbeat = agent.lastHeartbeat
+    ? Math.floor((Date.now() - new Date(agent.lastHeartbeat).getTime()) / 1000)
+    : null;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
@@ -172,7 +171,7 @@ function AgentCard({ agent }: { agent: Agent }) {
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                 {agent.name}
               </h3>
-              <p className={`text-sm ${providerColors[agent.provider]}`}>
+              <p className={`text-sm ${providerColors[agent.provider] || providerColors.custom}`}>
                 {agent.model}
               </p>
             </div>
@@ -185,53 +184,51 @@ function AgentCard({ agent }: { agent: Agent }) {
           </div>
         </div>
 
-        {agent.currentTask && (
+        {agent.currentTaskId && (
           <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
             <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
               Current Task
             </div>
             <div className="text-sm font-medium text-gray-900 dark:text-white mt-1">
-              {agent.currentTask}
+              {agent.currentTaskId}
             </div>
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {agent.capabilities.map((cap) => (
-            <span
-              key={cap}
-              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-            >
-              {cap}
-            </span>
-          ))}
-        </div>
+        {agent.capabilities.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {agent.capabilities.map((cap) => (
+              <span
+                key={cap}
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+              >
+                {cap}
+              </span>
+            ))}
+          </div>
+        )}
 
-        <div className="mt-4 grid grid-cols-3 gap-4 text-center">
+        <div className="mt-4 grid grid-cols-2 gap-4 text-center">
           <div>
             <div className="text-lg font-semibold text-gray-900 dark:text-white">
-              {(agent.tokensUsed / 1000).toFixed(0)}k
+              ${agent.totalSpend.toFixed(2)}
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">Tokens Used</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Total Spend</div>
           </div>
           <div>
             <div className="text-lg font-semibold text-gray-900 dark:text-white">
-              {agent.tasksCompleted}
+              ${agent.costPerToken.input.toFixed(4)} / ${agent.costPerToken.output.toFixed(4)}
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">Tasks Done</div>
-          </div>
-          <div>
-            <div className="text-lg font-semibold text-gray-900 dark:text-white">
-              ${((agent.tokensUsed * agent.costPerToken.input + agent.tokensUsed * 0.3 * agent.costPerToken.output) / 1000).toFixed(2)}
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">Est. Cost</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Cost/Token (in/out)</div>
           </div>
         </div>
       </div>
 
       <div className="px-6 py-3 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center text-sm">
         <span className="text-gray-500 dark:text-gray-400">
-          Last heartbeat: {formatTimeSince(timeSinceHeartbeat)}
+          {timeSinceHeartbeat !== null
+            ? `Last heartbeat: ${formatTimeSince(timeSinceHeartbeat)}`
+            : 'No heartbeat recorded'}
         </span>
         <div className="flex gap-2">
           <button className="text-conductor-600 hover:text-conductor-700 dark:text-conductor-400 dark:hover:text-conductor-300 font-medium">

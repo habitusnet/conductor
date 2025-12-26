@@ -1,38 +1,113 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
+interface ProjectStatus {
+  project: { id: string; name: string; conflictStrategy: string } | null;
+  tasks: {
+    total: number;
+    pending: number;
+    claimed: number;
+    inProgress: number;
+    completed: number;
+    failed: number;
+    blocked: number;
+  };
+  agents: {
+    total: number;
+    idle: number;
+    working: number;
+    blocked: number;
+    offline: number;
+  };
+  budget: {
+    total: number;
+    spent: number;
+    remaining: number;
+    percentUsed: string;
+    alertThreshold: number;
+  } | null;
+  conflicts: number;
+}
+
 export default function DashboardPage() {
+  const [status, setStatus] = useState<ProjectStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000); // Refresh every 5s
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch('/api/project');
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setStatus(data);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to connect to API');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-conductor-600"></div>
+      </div>
+    );
+  }
+
+  const hasData = status && (status.tasks.total > 0 || status.agents.total > 0);
+
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-          Conductor Dashboard
+          {status?.project?.name || 'Conductor Dashboard'}
         </h1>
         <p className="mt-2 text-gray-600 dark:text-gray-400">
           Multi-LLM orchestration overview
         </p>
       </div>
 
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Tasks"
-          value="0"
-          subtitle="0 in progress"
+          value={status?.tasks.total.toString() || '0'}
+          subtitle={`${status?.tasks.inProgress || 0} in progress`}
           color="blue"
         />
         <StatCard
           title="Active Agents"
-          value="0"
-          subtitle="0 working"
+          value={(status ? status.agents.total - status.agents.offline : 0).toString()}
+          subtitle={`${status?.agents.working || 0} working`}
           color="green"
         />
         <StatCard
           title="Budget Used"
-          value="$0.00"
-          subtitle="0% of limit"
+          value={status?.budget ? `$${status.budget.spent.toFixed(2)}` : '$0.00'}
+          subtitle={status?.budget ? `${status.budget.percentUsed}% of $${status.budget.total}` : 'No budget set'}
           color="purple"
         />
         <StatCard
           title="Conflicts"
-          value="0"
+          value={(status?.conflicts || 0).toString()}
           subtitle="0 unresolved"
           color="red"
         />
@@ -44,33 +119,61 @@ export default function DashboardPage() {
           Quick Actions
         </h2>
         <div className="flex flex-wrap gap-4">
-          <button className="px-4 py-2 bg-conductor-600 text-white rounded-lg hover:bg-conductor-700 transition-colors">
-            Add Task
-          </button>
-          <button className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
-            Register Agent
-          </button>
-          <button className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
-            View Logs
-          </button>
+          <a
+            href="/tasks"
+            className="px-4 py-2 bg-conductor-600 text-white rounded-lg hover:bg-conductor-700 transition-colors"
+          >
+            View Tasks
+          </a>
+          <a
+            href="/agents"
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+          >
+            View Agents
+          </a>
+          <a
+            href="/costs"
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+          >
+            View Costs
+          </a>
         </div>
       </div>
 
-      {/* Setup Instructions */}
-      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-amber-800 dark:text-amber-200 mb-2">
-          Getting Started
-        </h2>
-        <p className="text-amber-700 dark:text-amber-300 mb-4">
-          This dashboard is a placeholder. To connect it to your Conductor project:
-        </p>
-        <ol className="list-decimal list-inside text-amber-700 dark:text-amber-300 space-y-2">
-          <li>Initialize a project: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">conductor init</code></li>
-          <li>Register agents: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">conductor agent:register -i claude</code></li>
-          <li>Add tasks: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">conductor task:add -t &quot;My task&quot;</code></li>
-          <li>Set <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">CONDUCTOR_DB</code> environment variable</li>
-        </ol>
-      </div>
+      {/* Setup Instructions - only show if no data */}
+      {!hasData && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-amber-800 dark:text-amber-200 mb-2">
+            Getting Started
+          </h2>
+          <p className="text-amber-700 dark:text-amber-300 mb-4">
+            No project data found. To connect to a Conductor project:
+          </p>
+          <ol className="list-decimal list-inside text-amber-700 dark:text-amber-300 space-y-2">
+            <li>Initialize a project: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">conductor init</code></li>
+            <li>Set environment variable: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">CONDUCTOR_DB=./conductor.db</code></li>
+            <li>Set project ID: <code className="bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">CONDUCTOR_PROJECT_ID=your-project-id</code></li>
+            <li>Restart the dashboard</li>
+          </ol>
+        </div>
+      )}
+
+      {/* Task Status Overview */}
+      {hasData && status && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Task Status
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+            <StatusBadge label="Pending" count={status.tasks.pending} color="gray" />
+            <StatusBadge label="Claimed" count={status.tasks.claimed} color="blue" />
+            <StatusBadge label="In Progress" count={status.tasks.inProgress} color="yellow" />
+            <StatusBadge label="Completed" count={status.tasks.completed} color="green" />
+            <StatusBadge label="Failed" count={status.tasks.failed} color="red" />
+            <StatusBadge label="Blocked" count={status.tasks.blocked} color="orange" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -105,6 +208,32 @@ function StatCard({
         {value}
       </p>
       <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
+    </div>
+  );
+}
+
+function StatusBadge({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: 'gray' | 'blue' | 'yellow' | 'green' | 'red' | 'orange';
+}) {
+  const colorClasses = {
+    gray: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+    blue: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    yellow: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+    green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+    red: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+    orange: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  };
+
+  return (
+    <div className={`px-4 py-3 rounded-lg ${colorClasses[color]}`}>
+      <div className="text-2xl font-bold">{count}</div>
+      <div className="text-sm">{label}</div>
     </div>
   );
 }
