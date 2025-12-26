@@ -375,3 +375,76 @@ export interface AccessRequestFilters {
   status?: AccessRequestStatus | AccessRequestStatus[];
   agentType?: string;
 }
+
+// ============================================================================
+// Project Context Types (Agent Onboarding & Drift Prevention)
+// ============================================================================
+
+export const ProjectContextSchema = z.object({
+  // Project identity
+  projectId: z.string().uuid(),
+  projectName: z.string(),
+
+  // Current focus and goals
+  currentFocus: z.string().optional(), // What the team is working on now
+  projectGoals: z.array(z.string()).default([]), // High-level objectives
+
+  // Agent-specific instructions
+  agentInstructions: z.string().optional(), // From CLAUDE.md, GEMINI.md, etc.
+
+  // Coding standards and patterns
+  styleGuide: z.string().optional(), // Code style expectations
+  relevantPatterns: z.array(z.object({
+    file: z.string(),
+    description: z.string(),
+    lineRange: z.string().optional(), // e.g., "45-60"
+  })).default([]),
+
+  // Zone/scope restrictions
+  allowedPaths: z.array(z.string()).default([]), // Glob patterns
+  deniedPaths: z.array(z.string()).default([]),
+
+  // Checkpoint reminders
+  checkpointRules: z.array(z.string()).default([]), // e.g., "Run tests before commit"
+
+  // Task-specific context (added when claiming a task)
+  taskContext: z.object({
+    taskId: z.string(),
+    taskTitle: z.string(),
+    taskDescription: z.string().optional(),
+    expectedFiles: z.array(z.string()).default([]),
+    relatedTasks: z.array(z.string()).default([]),
+  }).optional(),
+
+  // Metadata
+  generatedAt: z.date().default(() => new Date()),
+  isFirstTask: z.boolean().default(false), // First task for this agent in project
+});
+
+export type ProjectContext = z.infer<typeof ProjectContextSchema>;
+
+export const ProjectOnboardingConfigSchema = z.object({
+  // Welcome message shown to all agents
+  welcomeMessage: z.string().optional(),
+
+  // Per-agent-type instructions file paths
+  agentInstructionsFiles: z.record(z.string()).default({}), // e.g., { claude: 'CLAUDE.md', gemini: 'GEMINI.md' }
+
+  // Current sprint/focus
+  currentFocus: z.string().optional(),
+
+  // Project goals
+  goals: z.array(z.string()).default([]),
+
+  // Style guide content or file path
+  styleGuide: z.string().optional(),
+
+  // Checkpoint configuration
+  checkpointRules: z.array(z.string()).default([]),
+  checkpointEveryNTasks: z.number().default(3),
+
+  // Auto-inject context refresh
+  autoRefreshContext: z.boolean().default(true),
+});
+
+export type ProjectOnboardingConfig = z.infer<typeof ProjectOnboardingConfigSchema>;

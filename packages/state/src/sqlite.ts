@@ -11,6 +11,8 @@ import type {
   AccessRequest,
   AccessRequestStatus,
   AccessRequestFilters,
+  ProjectContext,
+  ProjectOnboardingConfig,
 } from '@conductor/core';
 
 export interface StateStoreOptions {
@@ -161,6 +163,33 @@ export class SQLiteStateStore {
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
 
+      -- Project onboarding config table
+      CREATE TABLE IF NOT EXISTS project_onboarding (
+        project_id TEXT PRIMARY KEY,
+        welcome_message TEXT,
+        current_focus TEXT,
+        goals TEXT DEFAULT '[]', -- JSON array
+        style_guide TEXT,
+        checkpoint_rules TEXT DEFAULT '[]', -- JSON array
+        checkpoint_every_n_tasks INTEGER DEFAULT 3,
+        auto_refresh_context INTEGER DEFAULT 1,
+        agent_instructions TEXT DEFAULT '{}', -- JSON object: { claude: "...", gemini: "..." }
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      -- Agent task history (for tracking first task, checkpoint intervals)
+      CREATE TABLE IF NOT EXISTS agent_task_history (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        claimed_at TEXT DEFAULT (datetime('now')),
+        context_injected INTEGER DEFAULT 1, -- Was context bundle sent?
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      );
+
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
@@ -170,6 +199,7 @@ export class SQLiteStateStore {
       CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
       CREATE INDEX IF NOT EXISTS idx_access_requests_project ON access_requests(project_id);
       CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_agent_task_history_agent ON agent_task_history(project_id, agent_id);
     `);
   }
 
@@ -866,6 +896,233 @@ export class SQLiteStateStore {
       default:
         return 'custom';
     }
+  }
+
+  // ============================================================================
+  // Project Context Methods (Onboarding & Drift Prevention)
+  // ============================================================================
+
+  /**
+   * Set or update project onboarding configuration
+   */
+  setOnboardingConfig(projectId: string, config: Partial<ProjectOnboardingConfig>): void {
+    const existing = this.getOnboardingConfig(projectId);
+
+    if (existing) {
+      const updates: string[] = [];
+      const values: unknown[] = [];
+
+      if (config.welcomeMessage !== undefined) {
+        updates.push('welcome_message = ?');
+        values.push(config.welcomeMessage);
+      }
+      if (config.currentFocus !== undefined) {
+        updates.push('current_focus = ?');
+        values.push(config.currentFocus);
+      }
+      if (config.goals !== undefined) {
+        updates.push('goals = ?');
+        values.push(JSON.stringify(config.goals));
+      }
+      if (config.styleGuide !== undefined) {
+        updates.push('style_guide = ?');
+        values.push(config.styleGuide);
+      }
+      if (config.checkpointRules !== undefined) {
+        updates.push('checkpoint_rules = ?');
+        values.push(JSON.stringify(config.checkpointRules));
+      }
+      if (config.checkpointEveryNTasks !== undefined) {
+        updates.push('checkpoint_every_n_tasks = ?');
+        values.push(config.checkpointEveryNTasks);
+      }
+      if (config.autoRefreshContext !== undefined) {
+        updates.push('auto_refresh_context = ?');
+        values.push(config.autoRefreshContext ? 1 : 0);
+      }
+      if (config.agentInstructionsFiles !== undefined) {
+        updates.push('agent_instructions = ?');
+        values.push(JSON.stringify(config.agentInstructionsFiles));
+      }
+
+      updates.push("updated_at = datetime('now')");
+      values.push(projectId);
+
+      this.db
+        .prepare(`UPDATE project_onboarding SET ${updates.join(', ')} WHERE project_id = ?`)
+        .run(...values);
+    } else {
+      this.db
+        .prepare(
+          `INSERT INTO project_onboarding (project_id, welcome_message, current_focus, goals, style_guide, checkpoint_rules, checkpoint_every_n_tasks, auto_refresh_context, agent_instructions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          projectId,
+          config.welcomeMessage || null,
+          config.currentFocus || null,
+          JSON.stringify(config.goals || []),
+          config.styleGuide || null,
+          JSON.stringify(config.checkpointRules || []),
+          config.checkpointEveryNTasks || 3,
+          config.autoRefreshContext !== false ? 1 : 0,
+          JSON.stringify(config.agentInstructionsFiles || {})
+        );
+    }
+  }
+
+  /**
+   * Get project onboarding configuration
+   */
+  getOnboardingConfig(projectId: string): ProjectOnboardingConfig | null {
+    const row = this.db
+      .prepare('SELECT * FROM project_onboarding WHERE project_id = ?')
+      .get(projectId) as Record<string, unknown> | undefined;
+
+    if (!row) return null;
+
+    return {
+      welcomeMessage: (row['welcome_message'] as string) || undefined,
+      currentFocus: (row['current_focus'] as string) || undefined,
+      goals: JSON.parse((row['goals'] as string) || '[]'),
+      styleGuide: (row['style_guide'] as string) || undefined,
+      checkpointRules: JSON.parse((row['checkpoint_rules'] as string) || '[]'),
+      checkpointEveryNTasks: (row['checkpoint_every_n_tasks'] as number) || 3,
+      autoRefreshContext: row['auto_refresh_context'] === 1,
+      agentInstructionsFiles: JSON.parse((row['agent_instructions'] as string) || '{}'),
+    };
+  }
+
+  /**
+   * Record that an agent claimed a task (for tracking first task, checkpoints)
+   */
+  recordTaskClaim(projectId: string, agentId: string, taskId: string): void {
+    const id = crypto.randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO agent_task_history (id, project_id, agent_id, task_id)
+         VALUES (?, ?, ?, ?)`
+      )
+      .run(id, projectId, agentId, taskId);
+  }
+
+  /**
+   * Get count of tasks claimed by an agent in a project
+   */
+  getAgentTaskCount(projectId: string, agentId: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) as count FROM agent_task_history WHERE project_id = ? AND agent_id = ?')
+      .get(projectId, agentId) as { count: number };
+
+    return row.count;
+  }
+
+  /**
+   * Check if this is the agent's first task in the project
+   */
+  isFirstTaskForAgent(projectId: string, agentId: string): boolean {
+    return this.getAgentTaskCount(projectId, agentId) === 0;
+  }
+
+  /**
+   * Check if agent should receive a context refresh (based on checkpoint interval)
+   */
+  shouldRefreshContext(projectId: string, agentId: string): boolean {
+    const config = this.getOnboardingConfig(projectId);
+    if (!config || !config.autoRefreshContext) return false;
+
+    const taskCount = this.getAgentTaskCount(projectId, agentId);
+    return taskCount > 0 && taskCount % config.checkpointEveryNTasks === 0;
+  }
+
+  /**
+   * Generate a context bundle for an agent claiming a task
+   */
+  generateContextBundle(
+    projectId: string,
+    agentId: string,
+    agentType: string,
+    task: Task
+  ): ProjectContext {
+    const project = this.getProject(projectId);
+    const config = this.getOnboardingConfig(projectId);
+    const isFirstTask = this.isFirstTaskForAgent(projectId, agentId);
+    const accessRequest = this.listAccessRequests(projectId, { status: 'approved' })
+      .find((r) => r.agentId === agentId);
+
+    // Build agent instructions from config
+    let agentInstructions: string | undefined;
+    if (config?.agentInstructionsFiles?.[agentType]) {
+      agentInstructions = config.agentInstructionsFiles[agentType];
+    }
+
+    // Add welcome message for first task
+    if (isFirstTask && config?.welcomeMessage) {
+      agentInstructions = `${config.welcomeMessage}\n\n${agentInstructions || ''}`;
+    }
+
+    // Get related tasks (dependencies and tasks assigned to same files)
+    const relatedTasks: string[] = [...(task.dependencies || [])];
+    if (task.files && task.files.length > 0) {
+      const allTasks = this.listTasks(projectId, { status: ['in_progress', 'claimed'] });
+      for (const t of allTasks) {
+        if (t.id !== task.id && t.files?.some((f) => task.files?.includes(f))) {
+          relatedTasks.push(t.id);
+        }
+      }
+    }
+
+    return {
+      projectId,
+      projectName: project?.name || 'Unknown Project',
+      currentFocus: config?.currentFocus,
+      projectGoals: config?.goals || [],
+      agentInstructions,
+      styleGuide: config?.styleGuide,
+      relevantPatterns: [], // Could be populated from project config
+      allowedPaths: accessRequest ? JSON.parse(JSON.stringify(accessRequest.metadata?.['allowedPaths'] || [])) : [],
+      deniedPaths: accessRequest ? JSON.parse(JSON.stringify(accessRequest.metadata?.['deniedPaths'] || [])) : [],
+      checkpointRules: config?.checkpointRules || [],
+      taskContext: {
+        taskId: task.id,
+        taskTitle: task.title,
+        taskDescription: task.description,
+        expectedFiles: task.files || [],
+        relatedTasks: [...new Set(relatedTasks)],
+      },
+      generatedAt: new Date(),
+      isFirstTask,
+    };
+  }
+
+  /**
+   * Generate a context refresh (without task-specific context)
+   */
+  generateContextRefresh(projectId: string, agentId: string, agentType: string): ProjectContext {
+    const project = this.getProject(projectId);
+    const config = this.getOnboardingConfig(projectId);
+    const accessRequest = this.listAccessRequests(projectId, { status: 'approved' })
+      .find((r) => r.agentId === agentId);
+
+    let agentInstructions: string | undefined;
+    if (config?.agentInstructionsFiles?.[agentType]) {
+      agentInstructions = config.agentInstructionsFiles[agentType];
+    }
+
+    return {
+      projectId,
+      projectName: project?.name || 'Unknown Project',
+      currentFocus: config?.currentFocus,
+      projectGoals: config?.goals || [],
+      agentInstructions,
+      styleGuide: config?.styleGuide,
+      relevantPatterns: [],
+      allowedPaths: accessRequest ? JSON.parse(JSON.stringify(accessRequest.metadata?.['allowedPaths'] || [])) : [],
+      deniedPaths: accessRequest ? JSON.parse(JSON.stringify(accessRequest.metadata?.['deniedPaths'] || [])) : [],
+      checkpointRules: config?.checkpointRules || [],
+      generatedAt: new Date(),
+      isFirstTask: false,
+    };
   }
 
   // ============================================================================

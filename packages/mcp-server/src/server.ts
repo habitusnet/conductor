@@ -91,24 +91,111 @@ export function createConductorServer(options: ConductorServerOptions): McpServe
 
   server.tool(
     'conductor_claim_task',
-    'Claim a task to work on. Only pending tasks can be claimed.',
+    'Claim a task to work on. Returns task details and project context bundle for alignment.',
     {
       taskId: z.string().describe('The task ID to claim'),
-      agentId: z.string().describe('Your agent ID (e.g., claude, gemini, codex)'),
+      agentId: z.string().describe('Your agent ID (e.g., claude-session-123)'),
+      agentType: z
+        .enum(['claude', 'gemini', 'codex', 'gpt4', 'llama', 'custom'])
+        .default('custom')
+        .describe('Type of LLM agent (for context customization)'),
     },
-    async ({ taskId, agentId }) => {
+    async ({ taskId, agentId, agentType }) => {
       const success = stateStore.claimTask(taskId, agentId);
+
+      if (!success) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Failed to claim task ${taskId}. It may already be claimed or not available.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Get the task details
+      const task = stateStore.getTask(taskId);
+      if (!task) {
+        return {
+          content: [{ type: 'text', text: `Task ${taskId} not found after claiming.` }],
+          isError: true,
+        };
+      }
+
+      // Generate context bundle
+      const context = stateStore.generateContextBundle(projectId, agentId, agentType, task);
+
+      // Record task claim for checkpoint tracking
+      stateStore.recordTaskClaim(projectId, agentId, taskId);
+
+      // Check if this is a checkpoint moment
+      const isCheckpoint = stateStore.shouldRefreshContext(projectId, agentId);
+
+      // Build response
+      let responseText = `# Task Claimed Successfully\n\n`;
+      responseText += `**Task ID:** ${task.id}\n`;
+      responseText += `**Title:** ${task.title}\n`;
+      if (task.description) {
+        responseText += `**Description:** ${task.description}\n`;
+      }
+      responseText += `**Priority:** ${task.priority}\n`;
+      if (task.files && task.files.length > 0) {
+        responseText += `**Expected Files:** ${task.files.join(', ')}\n`;
+      }
+      responseText += '\n---\n\n';
+
+      // Add context bundle
+      responseText += `# Project Context\n\n`;
+      responseText += `**Project:** ${context.projectName}\n`;
+
+      if (context.isFirstTask) {
+        responseText += `\n> **Welcome!** This is your first task on this project.\n`;
+      }
+
+      if (isCheckpoint) {
+        responseText += `\n> **Checkpoint:** This is a periodic context refresh to keep you aligned.\n`;
+      }
+
+      if (context.currentFocus) {
+        responseText += `\n**Current Focus:** ${context.currentFocus}\n`;
+      }
+
+      if (context.projectGoals && context.projectGoals.length > 0) {
+        responseText += `\n**Project Goals:**\n`;
+        context.projectGoals.forEach((goal, i) => {
+          responseText += `${i + 1}. ${goal}\n`;
+        });
+      }
+
+      if (context.agentInstructions) {
+        responseText += `\n**Your Instructions:**\n${context.agentInstructions}\n`;
+      }
+
+      if (context.checkpointRules && context.checkpointRules.length > 0) {
+        responseText += `\n**Remember:**\n`;
+        context.checkpointRules.forEach((rule) => {
+          responseText += `- ${rule}\n`;
+        });
+      }
+
+      if (context.allowedPaths && context.allowedPaths.length > 0) {
+        responseText += `\n**Your Zone (allowed paths):** ${context.allowedPaths.join(', ')}\n`;
+      }
+
+      if (context.taskContext?.relatedTasks && context.taskContext.relatedTasks.length > 0) {
+        responseText += `\n**Related Tasks:** ${context.taskContext.relatedTasks.join(', ')}\n`;
+        responseText += `(Coordinate with agents working on these tasks)\n`;
+      }
 
       return {
         content: [
           {
             type: 'text',
-            text: success
-              ? `Successfully claimed task ${taskId}. You can now start working on it.`
-              : `Failed to claim task ${taskId}. It may already be claimed or not available.`,
+            text: responseText,
           },
         ],
-        isError: !success,
       };
     }
   );
@@ -540,6 +627,136 @@ export function createConductorServer(options: ConductorServerOptions): McpServe
           {
             type: 'text',
             text: `Access request PENDING.\nRequest ID: ${myRequest.id}\nQueue position: ${queuePosition}\nSubmitted: ${myRequest.requestedAt.toISOString()}\n\nWaiting for human approval...`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ============================================================================
+  // Context Management Tools
+  // ============================================================================
+
+  server.tool(
+    'conductor_refresh_context',
+    'Request a context refresh to realign with project goals and instructions. Use when feeling lost or after extended work.',
+    {
+      agentId: z.string().describe('Your agent ID'),
+      agentType: z
+        .enum(['claude', 'gemini', 'codex', 'gpt4', 'llama', 'custom'])
+        .default('custom')
+        .describe('Type of LLM agent (for context customization)'),
+    },
+    async ({ agentId, agentType }) => {
+      const context = stateStore.generateContextRefresh(projectId, agentId, agentType);
+
+      let responseText = `# Context Refresh\n\n`;
+      responseText += `**Project:** ${context.projectName}\n`;
+
+      if (context.currentFocus) {
+        responseText += `\n**Current Focus:** ${context.currentFocus}\n`;
+      }
+
+      if (context.projectGoals && context.projectGoals.length > 0) {
+        responseText += `\n**Project Goals:**\n`;
+        context.projectGoals.forEach((goal, i) => {
+          responseText += `${i + 1}. ${goal}\n`;
+        });
+      }
+
+      if (context.agentInstructions) {
+        responseText += `\n**Your Instructions:**\n${context.agentInstructions}\n`;
+      }
+
+      if (context.styleGuide) {
+        responseText += `\n**Style Guide:**\n${context.styleGuide}\n`;
+      }
+
+      if (context.checkpointRules && context.checkpointRules.length > 0) {
+        responseText += `\n**Remember:**\n`;
+        context.checkpointRules.forEach((rule) => {
+          responseText += `- ${rule}\n`;
+        });
+      }
+
+      if (context.allowedPaths && context.allowedPaths.length > 0) {
+        responseText += `\n**Your Zone (allowed paths):** ${context.allowedPaths.join(', ')}\n`;
+      }
+
+      if (context.deniedPaths && context.deniedPaths.length > 0) {
+        responseText += `**Restricted paths:** ${context.deniedPaths.join(', ')}\n`;
+      }
+
+      if (context.relevantPatterns && context.relevantPatterns.length > 0) {
+        responseText += `\n**Relevant Code Patterns:**\n`;
+        context.relevantPatterns.forEach((pattern) => {
+          responseText += `- ${pattern.file}${pattern.lineRange ? `:${pattern.lineRange}` : ''}: ${pattern.description}\n`;
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: responseText,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    'conductor_get_onboarding_config',
+    'Get the project onboarding configuration. Useful for understanding project setup.',
+    {},
+    async () => {
+      const config = stateStore.getOnboardingConfig(projectId);
+      const project = stateStore.getProject(projectId);
+
+      if (!config && !project) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No onboarding configuration found for this project.',
+            },
+          ],
+        };
+      }
+
+      let responseText = `# Project Onboarding Configuration\n\n`;
+      responseText += `**Project:** ${project?.name || projectId}\n`;
+
+      if (config?.welcomeMessage) {
+        responseText += `\n**Welcome Message:**\n${config.welcomeMessage}\n`;
+      }
+
+      if (config?.currentFocus) {
+        responseText += `\n**Current Focus:** ${config.currentFocus}\n`;
+      }
+
+      if (config?.goals && config.goals.length > 0) {
+        responseText += `\n**Project Goals:**\n`;
+        config.goals.forEach((goal, i) => {
+          responseText += `${i + 1}. ${goal}\n`;
+        });
+      }
+
+      if (config?.checkpointRules && config.checkpointRules.length > 0) {
+        responseText += `\n**Checkpoint Rules:**\n`;
+        config.checkpointRules.forEach((rule) => {
+          responseText += `- ${rule}\n`;
+        });
+      }
+
+      responseText += `\n**Context Refresh:** Every ${config?.checkpointEveryNTasks || 3} tasks`;
+      responseText += `\n**Auto Refresh:** ${config?.autoRefreshContext ? 'Enabled' : 'Disabled'}`;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: responseText,
           },
         ],
       };
