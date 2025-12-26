@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import {
+  getApiContext,
+  getPendingActions,
+  resolveConflict,
+  releaseLock,
+  updateTask,
+  updateAgentStatus,
+  listAgents,
+} from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 // Types for pending actions
 interface PendingConflict {
@@ -33,8 +42,6 @@ interface PendingEscalation {
   createdAt: string;
 }
 
-type PendingAction = PendingConflict | PendingApproval | PendingEscalation;
-
 interface FileLock {
   filePath: string;
   agentId: string;
@@ -44,40 +51,17 @@ interface FileLock {
 
 export async function GET() {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
+    const ctx = getApiContext();
+    const { conflicts: rawConflicts, locks, blockedTasks, agents } = await getPendingActions(ctx);
 
-    // Get conflicts from database
-    const db = (store as any).db;
-
-    // Get unresolved conflicts
-    const conflictRows = db
-      .prepare('SELECT * FROM conflicts WHERE project_id = ? AND resolved_at IS NULL ORDER BY created_at DESC')
-      .all(projectId) as Record<string, unknown>[];
-
-    const conflicts: PendingConflict[] = conflictRows.map((row) => ({
-      id: row['id'] as string,
+    const conflicts: PendingConflict[] = rawConflicts.map((c) => ({
+      id: c.id,
       type: 'conflict' as const,
-      filePath: row['file_path'] as string,
-      agents: JSON.parse((row['agents'] as string) || '[]'),
-      strategy: row['strategy'] as string,
-      createdAt: row['created_at'] as string,
+      filePath: c.filePath,
+      agents: c.agents,
+      strategy: c.strategy,
+      createdAt: c.createdAt,
     }));
-
-    // Get active file locks
-    const lockRows = db
-      .prepare("SELECT * FROM file_locks WHERE project_id = ? AND expires_at > datetime('now') ORDER BY locked_at DESC")
-      .all(projectId) as Record<string, unknown>[];
-
-    const locks: FileLock[] = lockRows.map((row) => ({
-      filePath: row['file_path'] as string,
-      agentId: row['agent_id'] as string,
-      lockedAt: row['locked_at'] as string,
-      expiresAt: row['expires_at'] as string,
-    }));
-
-    // Get blocked tasks (these need human decision)
-    const blockedTasks = store.listTasks(projectId, { status: 'blocked' });
 
     const escalations: PendingEscalation[] = blockedTasks.map((task) => ({
       id: task.id,
@@ -93,9 +77,8 @@ export async function GET() {
     const approvals: PendingApproval[] = [];
 
     // Get agent stats
-    const agents = store.listAgents(projectId);
-    const workingAgents = agents.filter(a => a.status === 'working');
-    const blockedAgents = agents.filter(a => a.status === 'blocked');
+    const workingAgents = agents.filter((a) => a.status === 'working');
+    const blockedAgents = agents.filter((a) => a.status === 'blocked');
 
     return NextResponse.json({
       conflicts,
@@ -124,73 +107,64 @@ export async function GET() {
 // Execute an action
 export async function POST(request: NextRequest) {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
+    const ctx = getApiContext();
     const body = await request.json();
     const { actionType, actionId, resolution, data } = body;
-
-    const db = (store as any).db;
 
     switch (actionType) {
       case 'resolve_conflict': {
         // resolution: 'accept_first' | 'accept_second' | 'merge' | 'defer'
-        db.prepare(
-          'UPDATE conflicts SET resolved_at = datetime("now"), resolution = ? WHERE id = ? AND project_id = ?'
-        ).run(resolution, actionId, projectId);
-
+        await resolveConflict(ctx, actionId, resolution);
         return NextResponse.json({ success: true, message: `Conflict resolved: ${resolution}` });
       }
 
       case 'force_release_lock': {
         const { filePath, agentId } = data;
-        db.prepare(
-          'DELETE FROM file_locks WHERE project_id = ? AND file_path = ? AND agent_id = ?'
-        ).run(projectId, filePath, agentId);
-
+        await releaseLock(ctx, filePath, agentId);
         return NextResponse.json({ success: true, message: `Lock released for ${filePath}` });
       }
 
       case 'unblock_task': {
-        store.updateTask(actionId, { status: 'pending', blockedBy: [] });
+        await updateTask(ctx, actionId, { status: 'pending', blockedBy: [] });
         return NextResponse.json({ success: true, message: 'Task unblocked' });
       }
 
       case 'cancel_task': {
-        store.updateTask(actionId, { status: 'cancelled' });
+        await updateTask(ctx, actionId, { status: 'cancelled' });
         return NextResponse.json({ success: true, message: 'Task cancelled' });
       }
 
       case 'reassign_task': {
         const { newAgentId } = data;
-        store.updateTask(actionId, { assignedTo: newAgentId, status: 'pending' });
+        await updateTask(ctx, actionId, { assignedTo: newAgentId, status: 'pending' });
         return NextResponse.json({ success: true, message: `Task reassigned to ${newAgentId}` });
       }
 
       case 'pause_agent': {
-        store.updateAgentStatus(data.agentId, 'blocked');
+        await updateAgentStatus(ctx, data.agentId, 'blocked');
         return NextResponse.json({ success: true, message: 'Agent paused' });
       }
 
       case 'resume_agent': {
-        store.updateAgentStatus(data.agentId, 'idle');
+        await updateAgentStatus(ctx, data.agentId, 'idle');
         return NextResponse.json({ success: true, message: 'Agent resumed' });
       }
 
       case 'pause_all': {
-        const agents = store.listAgents(projectId);
+        const agents = await listAgents(ctx);
         for (const agent of agents) {
           if (agent.status === 'working' || agent.status === 'idle') {
-            store.updateAgentStatus(agent.id, 'blocked');
+            await updateAgentStatus(ctx, agent.id, 'blocked');
           }
         }
         return NextResponse.json({ success: true, message: 'All agents paused' });
       }
 
       case 'resume_all': {
-        const agents = store.listAgents(projectId);
+        const agents = await listAgents(ctx);
         for (const agent of agents) {
           if (agent.status === 'blocked') {
-            store.updateAgentStatus(agent.id, 'idle');
+            await updateAgentStatus(ctx, agent.id, 'idle');
           }
         }
         return NextResponse.json({ success: true, message: 'All agents resumed' });

@@ -1,0 +1,45 @@
+# Conductor Dashboard - Cloudflare Pages Configuration
+name = "conductor-dashboard"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "conductor-db"
+database_id = "" # Fill in after running: wrangler d1 create conductor-db
+
+# KV Namespace for sessions/cache (optional)
+# [[kv_namespaces]]
+# binding = "SESSIONS"
+# id = "" # Fill in after running: wrangler kv:namespace create SESSIONS
+
+# Environment variables
+[vars]
+CONDUCTOR_ENV = "cloudflare"
+
+# Production environment
+[env.production]
+name = "conductor-dashboard"
+
+[env.production.vars]
+CONDUCTOR_ENV = "cloudflare"
+NODE_ENV = "production"
+
+# Preview/staging environment
+[env.preview]
+name = "conductor-dashboard-preview"
+
+[env.preview.vars]
+CONDUCTOR_ENV = "cloudflare"
+NODE_ENV = "preview"
+
+# Local development with D1
+[env.local]
+name = "conductor-dashboard-local"
+
+[[env.local.d1_databases]]
+binding = "DB"
+database_name = "conductor-db"
+database_id = "local"

@@ -1,17 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import { getApiContext, getProjectData } from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 export async function GET() {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-
-    const project = store.getProject(projectId);
-    const tasks = store.listTasks(projectId);
-    const agents = store.listAgents(projectId);
-    const totalSpend = store.getProjectSpend(projectId);
+    const ctx = getApiContext();
+    const { project, tasks, agents, totalSpend } = await getProjectData(ctx);
 
     const taskSummary = {
       total: tasks.length,
@@ -31,8 +27,8 @@ export async function GET() {
       offline: agents.filter((a) => a.status === 'offline').length,
     };
 
-    // Count unresolved conflicts (would need a method for this in state store)
-    const conflicts = 0; // Placeholder
+    // Count unresolved conflicts (placeholder)
+    const conflicts = 0;
 
     return NextResponse.json({
       project: project

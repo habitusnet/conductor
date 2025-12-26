@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import {
+  getApiContext,
+  getAccessRequests,
+  approveAccessRequest,
+  denyAccessRequest,
+  expireOldRequests
+} from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 // Types for access requests
 interface AccessRequestResponse {
@@ -25,13 +32,11 @@ interface AccessRequestResponse {
  */
 export async function GET(request: NextRequest) {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-
+    const ctx = getApiContext();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') as 'pending' | 'approved' | 'denied' | 'expired' | null;
 
-    const requests = store.listAccessRequests(projectId, status ? { status } : undefined);
+    const { requests, summary } = await getAccessRequests(ctx, status ? { status } : undefined);
 
     const formattedRequests: AccessRequestResponse[] = requests.map((req) => ({
       id: req.id,
@@ -47,16 +52,6 @@ export async function GET(request: NextRequest) {
       expiresAt: req.expiresAt?.toISOString(),
       denialReason: req.denialReason,
     }));
-
-    // Get summary stats
-    const allRequests = store.listAccessRequests(projectId);
-    const summary = {
-      total: allRequests.length,
-      pending: allRequests.filter((r) => r.status === 'pending').length,
-      approved: allRequests.filter((r) => r.status === 'approved').length,
-      denied: allRequests.filter((r) => r.status === 'denied').length,
-      expired: allRequests.filter((r) => r.status === 'expired').length,
-    };
 
     return NextResponse.json({
       requests: formattedRequests,
@@ -77,12 +72,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
+    const ctx = getApiContext();
     const body = await request.json();
-    const { action, requestId, reviewedBy, reason, expiresInDays } = body;
+    const { action, requestId, reviewedBy, reason } = body;
 
-    if (!requestId) {
+    if (!requestId && action !== 'expire_old') {
       return NextResponse.json(
         { error: 'Request ID is required' },
         { status: 400 }
@@ -91,48 +85,32 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'approve': {
-        const result = store.approveAccessRequest(
-          requestId,
-          reviewedBy || 'dashboard-user',
-          expiresInDays
-        );
+        const result = await approveAccessRequest(ctx, requestId, reviewedBy || 'dashboard-user');
         return NextResponse.json({
           success: true,
-          message: `Access approved for ${result.agentName}`,
+          message: 'Access approved',
           request: {
             id: result.id,
-            agentId: result.agentId,
-            agentName: result.agentName,
             status: result.status,
-            reviewedAt: result.reviewedAt?.toISOString(),
-            expiresAt: result.expiresAt?.toISOString(),
           },
         });
       }
 
       case 'deny': {
-        const result = store.denyAccessRequest(
-          requestId,
-          reviewedBy || 'dashboard-user',
-          reason
-        );
+        const result = await denyAccessRequest(ctx, requestId, reviewedBy || 'dashboard-user', reason);
         return NextResponse.json({
           success: true,
-          message: `Access denied for ${result.agentName}`,
+          message: 'Access denied',
           request: {
             id: result.id,
-            agentId: result.agentId,
-            agentName: result.agentName,
             status: result.status,
-            reviewedAt: result.reviewedAt?.toISOString(),
-            denialReason: result.denialReason,
           },
         });
       }
 
       case 'expire_old': {
         const olderThanHours = body.olderThanHours || 24;
-        const expiredCount = store.expireOldRequests(projectId, olderThanHours);
+        const expiredCount = await expireOldRequests(ctx, olderThanHours);
         return NextResponse.json({
           success: true,
           message: `Expired ${expiredCount} old request(s)`,

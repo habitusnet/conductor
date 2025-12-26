@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import { getApiContext, getOnboardingConfig, setOnboardingConfig } from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 export async function GET() {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-
-    const config = store.getOnboardingConfig(projectId);
-    const project = store.getProject(projectId);
+    const ctx = getApiContext();
+    const { config, project } = await getOnboardingConfig(ctx);
 
     return NextResponse.json({
-      projectId,
+      projectId: ctx.projectId,
       projectName: project?.name || 'Unknown Project',
       config: config || {
         welcomeMessage: '',
@@ -36,14 +34,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
+    const ctx = getApiContext();
     const body = await request.json();
 
     const { action, ...data } = body;
 
     if (action === 'save') {
-      store.setOnboardingConfig(projectId, {
+      await setOnboardingConfig(ctx, {
         welcomeMessage: data.welcomeMessage || undefined,
         currentFocus: data.currentFocus || undefined,
         goals: data.goals || [],

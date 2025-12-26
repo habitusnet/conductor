@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import { getApiContext, listTasks } from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 export async function GET(request: NextRequest) {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-
+    const ctx = getApiContext();
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status') || undefined;
     const priority = searchParams.get('priority') || undefined;
     const assignedTo = searchParams.get('assignedTo') || undefined;
 
-    const tasks = store.listTasks(projectId, {
+    const tasks = await listTasks(ctx, {
       status: status as any,
       priority: priority as any,
       assignedTo,
@@ -29,30 +28,5 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-    const body = await request.json();
-
-    const task = store.createTask(projectId, {
-      title: body.title,
-      description: body.description,
-      priority: body.priority || 'medium',
-      status: 'pending',
-      dependencies: body.dependencies || [],
-      tags: body.tags || [],
-      files: body.files || [],
-      estimatedTokens: body.estimatedTokens,
-      metadata: body.metadata || {},
-    });
-
-    return NextResponse.json({ task });
-  } catch (error) {
-    console.error('Failed to create task:', error);
-    return NextResponse.json(
-      { error: 'Failed to create task' },
-      { status: 500 }
-    );
-  }
-}
+// Note: POST for task creation is not supported on edge runtime
+// as it requires sync SQLite operations. Use the MCP server for task creation.

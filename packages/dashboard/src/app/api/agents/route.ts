@@ -1,24 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import { NextResponse } from 'next/server';
+import { getApiContext, listAgents } from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 export async function GET() {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
+    const ctx = getApiContext();
+    const agents = await listAgents(ctx);
 
-    const agents = store.listAgents(projectId);
-
-    // Calculate additional stats for each agent
-    const agentsWithStats = agents.map((agent) => {
-      const spend = store.getAgentSpend(agent.id);
-      return {
-        ...agent,
-        totalSpend: spend,
-        lastHeartbeat: agent.lastHeartbeat?.toISOString(),
-      };
-    });
+    const agentsWithStats = agents.map((agent) => ({
+      ...agent,
+      lastHeartbeat: agent.lastHeartbeat?.toISOString(),
+    }));
 
     return NextResponse.json({ agents: agentsWithStats });
   } catch (error) {
@@ -30,30 +24,5 @@ export async function GET() {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-    const body = await request.json();
-
-    store.registerAgent(projectId, {
-      id: body.id,
-      name: body.name,
-      provider: body.provider || 'custom',
-      model: body.model || body.id,
-      capabilities: body.capabilities || [],
-      costPerToken: body.costPerToken || { input: 0, output: 0 },
-      status: 'idle',
-      metadata: body.metadata || {},
-    });
-
-    const agent = store.getAgent(body.id);
-    return NextResponse.json({ agent });
-  } catch (error) {
-    console.error('Failed to register agent:', error);
-    return NextResponse.json(
-      { error: 'Failed to register agent' },
-      { status: 500 }
-    );
-  }
-}
+// Note: POST for agent registration is not supported on edge runtime
+// as it requires sync SQLite operations. Use the MCP server for agent registration.

@@ -1,20 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getStateStore, getProjectId } from '@/lib/db';
+import { getApiContext, getCostData, getProjectData } from '@/lib/edge-api-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge'; // Enable edge runtime for Cloudflare
 
 export async function GET() {
   try {
-    const store = getStateStore();
-    const projectId = getProjectId();
-
-    const costEvents = store.getCostEvents(projectId);
-    const project = store.getProject(projectId);
-    const totalSpend = store.getProjectSpend(projectId);
+    const ctx = getApiContext();
+    const [{ totalSpend, events }, { project }] = await Promise.all([
+      getCostData(ctx),
+      getProjectData(ctx),
+    ]);
 
     // Group costs by agent
     const byAgent: Record<string, { cost: number; tokens: number }> = {};
-    for (const event of costEvents) {
+    for (const event of events) {
       if (!byAgent[event.agentId]) {
         byAgent[event.agentId] = { cost: 0, tokens: 0 };
       }
@@ -32,7 +32,7 @@ export async function GET() {
       dailySpend[key] = 0;
     }
 
-    for (const event of costEvents) {
+    for (const event of events) {
       const day = event.createdAt.toISOString().split('T')[0];
       if (dailySpend[day] !== undefined) {
         dailySpend[day] += event.cost;
@@ -40,7 +40,7 @@ export async function GET() {
     }
 
     return NextResponse.json({
-      events: costEvents.slice(0, 50).map((e) => ({
+      events: events.slice(0, 50).map((e) => ({
         ...e,
         createdAt: e.createdAt.toISOString(),
       })),
