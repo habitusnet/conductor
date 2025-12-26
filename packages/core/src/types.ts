@@ -344,3 +344,34 @@ export const ConnectorConfigSchema = z.object({
 });
 
 export type ConnectorConfig = z.infer<typeof ConnectorConfigSchema>;
+
+// ============================================================================
+// Access Request Types (Agent Onboarding)
+// ============================================================================
+
+export type AccessRequestStatus = 'pending' | 'approved' | 'denied' | 'expired';
+
+export const AccessRequestSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  agentId: z.string(),
+  agentName: z.string(),
+  agentType: z.enum(['claude', 'gemini', 'codex', 'gpt4', 'llama', 'custom']),
+  capabilities: z.array(z.string()).default([]),
+  requestedRole: z.enum(['lead', 'contributor', 'reviewer', 'observer']).default('contributor'),
+  status: z.enum(['pending', 'approved', 'denied', 'expired']).default('pending'),
+  requestedAt: z.date().default(() => new Date()),
+  reviewedAt: z.date().optional(),
+  reviewedBy: z.string().optional(), // User who approved/denied
+  expiresAt: z.date().optional(), // When access expires (if approved)
+  denialReason: z.string().optional(),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+export type AccessRequest = z.infer<typeof AccessRequestSchema>;
+
+export interface AccessRequestFilters {
+  projectId?: string;
+  status?: AccessRequestStatus | AccessRequestStatus[];
+  agentType?: string;
+}

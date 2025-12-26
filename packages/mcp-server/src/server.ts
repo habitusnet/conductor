@@ -407,6 +407,146 @@ export function createConductorServer(options: ConductorServerOptions): McpServe
   );
 
   // ============================================================================
+  // Access Request Tools (Agent Onboarding)
+  // ============================================================================
+
+  server.tool(
+    'conductor_request_access',
+    'Request access to work on this project. Must be approved before you can claim tasks.',
+    {
+      agentId: z.string().describe('Your unique agent ID (e.g., claude-session-123)'),
+      agentName: z.string().describe('Human-readable name (e.g., Claude Code)'),
+      agentType: z
+        .enum(['claude', 'gemini', 'codex', 'gpt4', 'llama', 'custom'])
+        .describe('Type of LLM agent'),
+      capabilities: z
+        .array(z.string())
+        .default([])
+        .describe('List of capabilities (e.g., typescript, react, testing)'),
+      requestedRole: z
+        .enum(['lead', 'contributor', 'reviewer', 'observer'])
+        .default('contributor')
+        .describe('Requested role in the project'),
+    },
+    async ({ agentId, agentName, agentType, capabilities, requestedRole }) => {
+      // Check if agent already has approved access
+      if (stateStore.hasApprovedAccess(projectId, agentId)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Access already approved for ${agentId}. You can proceed to claim tasks.`,
+            },
+          ],
+        };
+      }
+
+      const request = stateStore.createAccessRequest(projectId, {
+        agentId,
+        agentName,
+        agentType,
+        capabilities,
+        requestedRole,
+      });
+
+      if (request.status === 'approved') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Access approved! You can now claim tasks.\nRole: ${request.requestedRole}\nCapabilities: ${request.capabilities.join(', ')}`,
+            },
+          ],
+        };
+      }
+
+      const queuePosition = stateStore.getPendingAccessCount(projectId);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Access request submitted and pending approval.\nRequest ID: ${request.id}\nQueue position: ${queuePosition}\nRequested role: ${requestedRole}\n\nA human operator will review your request. Use conductor_check_access to check status.`,
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    'conductor_check_access',
+    'Check if your access request has been approved',
+    {
+      agentId: z.string().describe('Your agent ID'),
+    },
+    async ({ agentId }) => {
+      if (stateStore.hasApprovedAccess(projectId, agentId)) {
+        const requests = stateStore.listAccessRequests(projectId, { status: 'approved' });
+        const myRequest = requests.find((r) => r.agentId === agentId);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Access APPROVED.\nRole: ${myRequest?.requestedRole || 'contributor'}\nExpires: ${myRequest?.expiresAt?.toISOString() || 'Never'}\n\nYou can now use conductor_list_tasks and conductor_claim_task.`,
+            },
+          ],
+        };
+      }
+
+      const requests = stateStore.listAccessRequests(projectId);
+      const myRequest = requests.find((r) => r.agentId === agentId);
+
+      if (!myRequest) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No access request found for ${agentId}. Use conductor_request_access to submit a request.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (myRequest.status === 'denied') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Access DENIED.\nReason: ${myRequest.denialReason || 'No reason provided'}\nReviewed by: ${myRequest.reviewedBy}\n\nYou may submit a new request with different parameters.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (myRequest.status === 'expired') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Access request EXPIRED. Please submit a new request using conductor_request_access.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Status is pending
+      const queuePosition = stateStore.getPendingAccessCount(projectId);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Access request PENDING.\nRequest ID: ${myRequest.id}\nQueue position: ${queuePosition}\nSubmitted: ${myRequest.requestedAt.toISOString()}\n\nWaiting for human approval...`,
+          },
+        ],
+      };
+    }
+  );
+
+  // ============================================================================
   // Resources
   // ============================================================================
 

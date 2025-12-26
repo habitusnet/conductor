@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { ActionForwardPanel } from '@/components/ActionForwardPanel';
+import { AccessQueuePanel } from '@/components/AccessQueuePanel';
 
 interface ProjectStatus {
   project: { id: string; name: string; conflictStrategy: string } | null;
@@ -116,6 +117,9 @@ export default function DashboardPage() {
 
       {/* Action Forward Panel */}
       <ActionForwardPanel onRefresh={fetchStatus} />
+
+      {/* Access Queue Panel */}
+      <AccessQueuePanel onRefresh={fetchStatus} />
 
       {/* Navigation Links */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">

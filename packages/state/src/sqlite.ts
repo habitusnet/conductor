@@ -8,6 +8,9 @@ import type {
   FileLock,
   CostEvent,
   AgentStatus,
+  AccessRequest,
+  AccessRequestStatus,
+  AccessRequestFilters,
 } from '@conductor/core';
 
 export interface StateStoreOptions {
@@ -139,6 +142,25 @@ export class SQLiteStateStore {
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
       );
 
+      -- Access requests table (Agent onboarding queue)
+      CREATE TABLE IF NOT EXISTS access_requests (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        agent_type TEXT NOT NULL DEFAULT 'custom',
+        capabilities TEXT DEFAULT '[]', -- JSON array
+        requested_role TEXT DEFAULT 'contributor',
+        status TEXT DEFAULT 'pending',
+        requested_at TEXT DEFAULT (datetime('now')),
+        reviewed_at TEXT,
+        reviewed_by TEXT,
+        expires_at TEXT,
+        denial_reason TEXT,
+        metadata TEXT DEFAULT '{}', -- JSON object
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
@@ -146,6 +168,8 @@ export class SQLiteStateStore {
       CREATE INDEX IF NOT EXISTS idx_file_locks_project ON file_locks(project_id);
       CREATE INDEX IF NOT EXISTS idx_cost_events_project ON cost_events(project_id);
       CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
+      CREATE INDEX IF NOT EXISTS idx_access_requests_project ON access_requests(project_id);
+      CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status);
     `);
   }
 
@@ -607,6 +631,241 @@ export class SQLiteStateStore {
       cost: row['cost'] as number,
       createdAt: new Date(row['created_at'] as string),
     }));
+  }
+
+  // ============================================================================
+  // Access Request Methods
+  // ============================================================================
+
+  /**
+   * Create a new access request (agent requesting to join project)
+   */
+  createAccessRequest(
+    projectId: string,
+    request: {
+      agentId: string;
+      agentName: string;
+      agentType: string;
+      capabilities?: string[];
+      requestedRole?: 'lead' | 'contributor' | 'reviewer' | 'observer';
+      metadata?: Record<string, unknown>;
+    }
+  ): AccessRequest {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    // Check if there's already a pending request from this agent
+    const existing = this.db
+      .prepare(
+        "SELECT id FROM access_requests WHERE project_id = ? AND agent_id = ? AND status = 'pending'"
+      )
+      .get(projectId, request.agentId) as { id: string } | undefined;
+
+    if (existing) {
+      return this.getAccessRequest(existing.id)!;
+    }
+
+    this.db
+      .prepare(
+        `INSERT INTO access_requests (id, project_id, agent_id, agent_name, agent_type, capabilities, requested_role, status, requested_at, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+      )
+      .run(
+        id,
+        projectId,
+        request.agentId,
+        request.agentName,
+        request.agentType,
+        JSON.stringify(request.capabilities || []),
+        request.requestedRole || 'contributor',
+        now,
+        JSON.stringify(request.metadata || {})
+      );
+
+    return this.getAccessRequest(id)!;
+  }
+
+  /**
+   * Get a single access request by ID
+   */
+  getAccessRequest(requestId: string): AccessRequest | null {
+    const row = this.db
+      .prepare('SELECT * FROM access_requests WHERE id = ?')
+      .get(requestId) as Record<string, unknown> | undefined;
+
+    if (!row) return null;
+    return this.rowToAccessRequest(row);
+  }
+
+  /**
+   * List access requests for a project
+   */
+  listAccessRequests(projectId: string, filters?: AccessRequestFilters): AccessRequest[] {
+    let query = 'SELECT * FROM access_requests WHERE project_id = ?';
+    const params: unknown[] = [projectId];
+
+    if (filters?.status) {
+      const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+      query += ` AND status IN (${statuses.map(() => '?').join(', ')})`;
+      params.push(...statuses);
+    }
+
+    if (filters?.agentType) {
+      query += ' AND agent_type = ?';
+      params.push(filters.agentType);
+    }
+
+    query += ' ORDER BY requested_at DESC';
+
+    const rows = this.db.prepare(query).all(...params) as Record<string, unknown>[];
+    return rows.map((row) => this.rowToAccessRequest(row));
+  }
+
+  /**
+   * Approve an access request
+   */
+  approveAccessRequest(
+    requestId: string,
+    reviewedBy: string,
+    expiresInDays?: number
+  ): AccessRequest {
+    const now = new Date();
+    const expiresAt = expiresInDays
+      ? new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+
+    this.db
+      .prepare(
+        `UPDATE access_requests
+         SET status = 'approved', reviewed_at = ?, reviewed_by = ?, expires_at = ?
+         WHERE id = ?`
+      )
+      .run(now.toISOString(), reviewedBy, expiresAt, requestId);
+
+    const request = this.getAccessRequest(requestId)!;
+
+    // Auto-register the agent in the project if not already registered
+    const existingAgent = this.db
+      .prepare('SELECT id FROM agents WHERE id = ? AND project_id = ?')
+      .get(request.agentId, request.projectId);
+
+    if (!existingAgent) {
+      this.registerAgent(request.projectId, {
+        id: request.agentId,
+        name: request.agentName,
+        provider: this.agentTypeToProvider(request.agentType),
+        model: request.agentType,
+        capabilities: request.capabilities,
+        costPerToken: { input: 0, output: 0 },
+        status: 'idle',
+        metadata: request.metadata,
+      });
+    }
+
+    return request;
+  }
+
+  /**
+   * Deny an access request
+   */
+  denyAccessRequest(
+    requestId: string,
+    reviewedBy: string,
+    reason?: string
+  ): AccessRequest {
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare(
+        `UPDATE access_requests
+         SET status = 'denied', reviewed_at = ?, reviewed_by = ?, denial_reason = ?
+         WHERE id = ?`
+      )
+      .run(now, reviewedBy, reason || null, requestId);
+
+    return this.getAccessRequest(requestId)!;
+  }
+
+  /**
+   * Check if an agent has approved access to a project
+   */
+  hasApprovedAccess(projectId: string, agentId: string): boolean {
+    const now = new Date().toISOString();
+
+    const row = this.db
+      .prepare(
+        `SELECT id FROM access_requests
+         WHERE project_id = ? AND agent_id = ? AND status = 'approved'
+         AND (expires_at IS NULL OR expires_at > ?)`
+      )
+      .get(projectId, agentId, now);
+
+    return !!row;
+  }
+
+  /**
+   * Get pending access request count for a project
+   */
+  getPendingAccessCount(projectId: string): number {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) as count FROM access_requests WHERE project_id = ? AND status = 'pending'"
+      )
+      .get(projectId) as { count: number };
+
+    return row.count;
+  }
+
+  /**
+   * Expire old pending requests
+   */
+  expireOldRequests(projectId: string, olderThanHours = 24): number {
+    const cutoff = new Date(Date.now() - olderThanHours * 60 * 60 * 1000).toISOString();
+
+    const result = this.db
+      .prepare(
+        `UPDATE access_requests
+         SET status = 'expired'
+         WHERE project_id = ? AND status = 'pending' AND requested_at < ?`
+      )
+      .run(projectId, cutoff);
+
+    return result.changes;
+  }
+
+  private rowToAccessRequest(row: Record<string, unknown>): AccessRequest {
+    return {
+      id: row['id'] as string,
+      projectId: row['project_id'] as string,
+      agentId: row['agent_id'] as string,
+      agentName: row['agent_name'] as string,
+      agentType: row['agent_type'] as AccessRequest['agentType'],
+      capabilities: JSON.parse((row['capabilities'] as string) || '[]'),
+      requestedRole: row['requested_role'] as AccessRequest['requestedRole'],
+      status: row['status'] as AccessRequestStatus,
+      requestedAt: new Date(row['requested_at'] as string),
+      reviewedAt: row['reviewed_at'] ? new Date(row['reviewed_at'] as string) : undefined,
+      reviewedBy: (row['reviewed_by'] as string) || undefined,
+      expiresAt: row['expires_at'] ? new Date(row['expires_at'] as string) : undefined,
+      denialReason: (row['denial_reason'] as string) || undefined,
+      metadata: JSON.parse((row['metadata'] as string) || '{}'),
+    };
+  }
+
+  private agentTypeToProvider(agentType: string): AgentProfile['provider'] {
+    switch (agentType) {
+      case 'claude':
+        return 'anthropic';
+      case 'gemini':
+        return 'google';
+      case 'gpt4':
+      case 'codex':
+        return 'openai';
+      case 'llama':
+        return 'meta';
+      default:
+        return 'custom';
+    }
   }
 
   // ============================================================================
