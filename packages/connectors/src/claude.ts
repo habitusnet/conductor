@@ -46,8 +46,11 @@ export class ClaudeConnector implements Connector {
       messages,
     });
 
+    const firstBlock = response.content[0];
+    const content = firstBlock && firstBlock.type === 'text' ? firstBlock.text : '';
+
     return {
-      content: response.content[0].type === 'text' ? response.content[0].text : '',
+      content,
       usage: {
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,

@@ -37,11 +37,15 @@ export class SQLiteStateStore {
       -- Projects table
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
         name TEXT NOT NULL,
-        root_path TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        root_path TEXT,
         git_remote TEXT,
-        default_branch TEXT DEFAULT 'main',
+        git_branch TEXT DEFAULT 'main',
         conflict_strategy TEXT DEFAULT 'lock',
+        settings TEXT DEFAULT '{}',
+        is_active INTEGER DEFAULT 1,
         budget_total REAL,
         budget_spent REAL DEFAULT 0,
         budget_alert_threshold REAL DEFAULT 80,
@@ -54,6 +58,8 @@ export class SQLiteStateStore {
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
         name TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'custom',
+        model TEXT,
         status TEXT DEFAULT 'idle',
         capabilities TEXT, -- JSON array
         cost_input REAL DEFAULT 0,
@@ -62,6 +68,7 @@ export class SQLiteStateStore {
         quota_used INTEGER DEFAULT 0,
         quota_reset_at TEXT,
         last_heartbeat TEXT,
+        metadata TEXT DEFAULT '{}', -- JSON object
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
 
@@ -85,6 +92,7 @@ export class SQLiteStateStore {
         tags TEXT DEFAULT '[]', -- JSON array
         metadata TEXT DEFAULT '{}', -- JSON object
         created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
         FOREIGN KEY (assigned_to) REFERENCES agents(id) ON DELETE SET NULL
       );
@@ -116,9 +124,11 @@ export class SQLiteStateStore {
 
       -- Cost events table
       CREATE TABLE IF NOT EXISTS cost_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
         project_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
+        model TEXT NOT NULL,
         task_id TEXT,
         tokens_input INTEGER NOT NULL,
         tokens_output INTEGER NOT NULL,
@@ -149,16 +159,20 @@ export class SQLiteStateStore {
 
     this.db
       .prepare(
-        `INSERT INTO projects (id, name, root_path, git_remote, default_branch, conflict_strategy, budget_total, budget_spent, budget_alert_threshold, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO projects (id, organization_id, name, slug, root_path, git_remote, git_branch, conflict_strategy, settings, is_active, budget_total, budget_spent, budget_alert_threshold, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
+        project.organizationId,
         project.name,
-        project.rootPath,
+        project.slug,
+        project.rootPath || null,
         project.gitRemote || null,
-        project.defaultBranch || 'main',
+        project.gitBranch || 'main',
         project.conflictStrategy || 'lock',
+        JSON.stringify(project.settings || {}),
+        project.isActive !== false ? 1 : 0,
         project.budget?.total || null,
         project.budget?.spent || 0,
         project.budget?.alertThreshold || 80,
@@ -179,11 +193,15 @@ export class SQLiteStateStore {
 
     return {
       id: row['id'] as string,
+      organizationId: row['organization_id'] as string,
       name: row['name'] as string,
-      rootPath: row['root_path'] as string,
+      slug: row['slug'] as string,
+      rootPath: (row['root_path'] as string) || undefined,
       gitRemote: (row['git_remote'] as string) || undefined,
-      defaultBranch: row['default_branch'] as string,
+      gitBranch: (row['git_branch'] as string) || 'main',
       conflictStrategy: row['conflict_strategy'] as Project['conflictStrategy'],
+      settings: JSON.parse((row['settings'] as string) || '{}'),
+      isActive: row['is_active'] === 1,
       budget: row['budget_total']
         ? {
             total: row['budget_total'] as number,
@@ -215,13 +233,15 @@ export class SQLiteStateStore {
   registerAgent(projectId: string, agent: AgentProfile): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO agents (id, project_id, name, status, capabilities, cost_input, cost_output, quota_limit, quota_used, quota_reset_at, last_heartbeat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR REPLACE INTO agents (id, project_id, name, provider, model, status, capabilities, cost_input, cost_output, quota_limit, quota_used, quota_reset_at, last_heartbeat, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         agent.id,
         projectId,
         agent.name,
+        agent.provider || 'custom',
+        agent.model || null,
         agent.status || 'idle',
         JSON.stringify(agent.capabilities),
         agent.costPerToken.input,
@@ -229,7 +249,8 @@ export class SQLiteStateStore {
         agent.quotaLimit || null,
         agent.quotaUsed || 0,
         agent.quotaResetAt?.toISOString() || null,
-        agent.lastHeartbeat?.toISOString() || null
+        agent.lastHeartbeat?.toISOString() || null,
+        JSON.stringify(agent.metadata || {})
       );
   }
 
@@ -267,6 +288,8 @@ export class SQLiteStateStore {
     return {
       id: row['id'] as string,
       name: row['name'] as string,
+      provider: (row['provider'] as AgentProfile['provider']) || 'custom',
+      model: (row['model'] as string) || row['id'] as string,
       status: row['status'] as AgentStatus,
       capabilities: JSON.parse((row['capabilities'] as string) || '[]'),
       costPerToken: {
@@ -281,6 +304,7 @@ export class SQLiteStateStore {
       lastHeartbeat: row['last_heartbeat']
         ? new Date(row['last_heartbeat'] as string)
         : undefined,
+      metadata: JSON.parse((row['metadata'] as string) || '{}'),
     };
   }
 
@@ -288,7 +312,7 @@ export class SQLiteStateStore {
   // Task Methods
   // ============================================================================
 
-  createTask(projectId: string, task: Omit<Task, 'id' | 'createdAt'>): Task {
+  createTask(projectId: string, task: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>): Task {
     const id = crypto.randomUUID();
 
     this.db
@@ -426,6 +450,7 @@ export class SQLiteStateStore {
   private rowToTask(row: Record<string, unknown>): Task {
     return {
       id: row['id'] as string,
+      projectId: row['project_id'] as string,
       title: row['title'] as string,
       description: (row['description'] as string) || undefined,
       status: row['status'] as Task['status'],
@@ -450,6 +475,7 @@ export class SQLiteStateStore {
       tags: JSON.parse((row['tags'] as string) || '[]'),
       metadata: JSON.parse((row['metadata'] as string) || '{}'),
       createdAt: new Date(row['created_at'] as string),
+      updatedAt: new Date((row['updated_at'] as string) || (row['created_at'] as string)),
     };
   }
 
@@ -522,14 +548,18 @@ export class SQLiteStateStore {
   // ============================================================================
 
   recordCost(event: Omit<CostEvent, 'id' | 'createdAt'>): void {
+    const id = crypto.randomUUID();
     this.db
       .prepare(
-        `INSERT INTO cost_events (project_id, agent_id, task_id, tokens_input, tokens_output, cost)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO cost_events (id, organization_id, project_id, agent_id, model, task_id, tokens_input, tokens_output, cost)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
+        id,
+        event.organizationId,
         event.projectId,
         event.agentId,
+        event.model,
         event.taskId || null,
         event.tokensInput,
         event.tokensOutput,
@@ -566,9 +596,11 @@ export class SQLiteStateStore {
       .all(projectId) as Record<string, unknown>[];
 
     return rows.map((row) => ({
-      id: row['id'] as number,
+      id: row['id'] as string,
+      organizationId: row['organization_id'] as string,
       projectId: row['project_id'] as string,
       agentId: row['agent_id'] as string,
+      model: row['model'] as string,
       taskId: (row['task_id'] as string) || undefined,
       tokensInput: row['tokens_input'] as number,
       tokensOutput: row['tokens_output'] as number,

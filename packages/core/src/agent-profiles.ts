@@ -7,6 +7,8 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
   claude: {
     id: 'claude',
     name: 'Claude Code',
+    provider: 'anthropic',
+    model: 'claude-opus-4',
     capabilities: [
       'typescript',
       'javascript',
@@ -26,10 +28,13 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0.000075,
     },
     status: 'idle',
+    metadata: {},
   },
   'claude-sonnet': {
     id: 'claude-sonnet',
     name: 'Claude Sonnet',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4',
     capabilities: [
       'typescript',
       'javascript',
@@ -43,10 +48,13 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0.000015,
     },
     status: 'idle',
+    metadata: {},
   },
   'claude-haiku': {
     id: 'claude-haiku',
     name: 'Claude Haiku',
+    provider: 'anthropic',
+    model: 'claude-haiku',
     capabilities: [
       'typescript',
       'javascript',
@@ -58,10 +66,13 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0.00000125,
     },
     status: 'idle',
+    metadata: {},
   },
   gemini: {
     id: 'gemini',
     name: 'Gemini 2.0 Flash',
+    provider: 'google',
+    model: 'gemini-2.0-flash',
     capabilities: [
       'typescript',
       'javascript',
@@ -78,10 +89,13 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0.0000004,
     },
     status: 'idle',
+    metadata: {},
   },
   codex: {
     id: 'codex',
     name: 'OpenAI Codex CLI',
+    provider: 'openai',
+    model: 'codex',
     capabilities: [
       'typescript',
       'javascript',
@@ -96,10 +110,13 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0,
     },
     status: 'idle',
+    metadata: {},
   },
   'gpt-4o': {
     id: 'gpt-4o',
     name: 'GPT-4o',
+    provider: 'openai',
+    model: 'gpt-4o',
     capabilities: [
       'typescript',
       'javascript',
@@ -112,6 +129,7 @@ export const DEFAULT_AGENT_PROFILES: Record<string, AgentProfile> = {
       output: 0.00001,
     },
     status: 'idle',
+    metadata: {},
   },
 };
 
@@ -147,12 +165,17 @@ export function createAgentProfile(
     return { ...base, ...cleanOverrides, id };
   }
 
+  // For custom agents (not in defaults), provider and model should be specified
+  // Fall back to 'custom' provider if not specified
   return {
     id,
     name: cleanOverrides.name || id,
+    provider: cleanOverrides.provider || 'custom',
+    model: cleanOverrides.model || id,
     capabilities: cleanOverrides.capabilities || [],
     costPerToken: cleanOverrides.costPerToken || { input: 0, output: 0 },
     status: cleanOverrides.status || 'idle',
+    metadata: cleanOverrides.metadata || {},
     ...cleanOverrides,
   };
 }

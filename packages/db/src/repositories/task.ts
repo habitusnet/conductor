@@ -29,6 +29,7 @@ export function createTaskRepository(db: any) {
         taskId: task.id,
         action: 'created',
         description: `Task created: ${task.title}`,
+        metadata: {},
       });
 
       return result[0];
@@ -84,6 +85,7 @@ export function createTaskRepository(db: any) {
           agentId,
           action: 'claimed',
           description: `Task claimed by ${agentId}`,
+          metadata: {},
         });
       }
 
@@ -107,6 +109,7 @@ export function createTaskRepository(db: any) {
           taskId: id,
           agentId: result[0].assignedTo,
           action: 'started',
+          metadata: {},
         });
       }
 
@@ -133,6 +136,7 @@ export function createTaskRepository(db: any) {
           agentId: updated[0].assignedTo,
           action: 'completed',
           description: result,
+          metadata: {},
         });
       }
 
@@ -157,6 +161,7 @@ export function createTaskRepository(db: any) {
           agentId: result[0].assignedTo,
           action: 'failed',
           description: errorMessage,
+          metadata: {},
         });
       }
 
@@ -169,7 +174,7 @@ export function createTaskRepository(db: any) {
         taskId: id,
         action: 'progress_update',
         description,
-        metadata,
+        metadata: metadata || {},
       });
     },
 

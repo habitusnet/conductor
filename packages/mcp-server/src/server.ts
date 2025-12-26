@@ -287,9 +287,12 @@ export function createConductorServer(options: ConductorServerOptions): McpServe
         tokensInput * agent.costPerToken.input +
         tokensOutput * agent.costPerToken.output;
 
+      const project = stateStore.getProject(projectId);
       stateStore.recordCost({
+        organizationId: project?.organizationId || 'unknown',
         projectId,
         agentId,
+        model: agent.model || 'unknown',
         taskId,
         tokensInput,
         tokensOutput,
@@ -297,7 +300,6 @@ export function createConductorServer(options: ConductorServerOptions): McpServe
       });
 
       const totalSpend = stateStore.getProjectSpend(projectId);
-      const project = stateStore.getProject(projectId);
       const budgetInfo = project?.budget
         ? ` Budget: $${totalSpend.toFixed(4)} / $${project.budget.total}`
         : '';

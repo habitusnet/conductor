@@ -13,7 +13,10 @@ export class ConflictDetector {
   /**
    * Detect tasks that are working on overlapping files
    */
-  async detectOverlappingTasks(tasks: Task[]): Promise<FileConflict[]> {
+  async detectOverlappingTasks(
+    tasks: Task[],
+    projectId: string
+  ): Promise<FileConflict[]> {
     const conflicts: FileConflict[] = [];
     const fileToTasks = new Map<string, Task[]>();
 
@@ -32,6 +35,7 @@ export class ConflictDetector {
       if (fileTasks.length > 1) {
         conflicts.push({
           id: crypto.randomUUID(),
+          projectId,
           filePath: file,
           agents: fileTasks
             .map((t) => t.assignedTo)

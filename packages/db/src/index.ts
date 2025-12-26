@@ -44,7 +44,7 @@ export function getDb(config?: DatabaseConfig) {
   }
 
   if (!defaultDb) {
-    const dbPath = process.env.CONDUCTOR_DB_PATH || './conductor.db';
+    const dbPath = process.env['CONDUCTOR_DB_PATH'] || './conductor.db';
     defaultDb = createSqliteDb(dbPath);
   }
 

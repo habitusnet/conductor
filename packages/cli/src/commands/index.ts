@@ -47,11 +47,16 @@ program
     const store = getStore();
     const name = options.name || path.basename(process.cwd());
 
+    const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const project = store.createProject({
       name,
+      slug,
+      organizationId: crypto.randomUUID(), // Default org for local projects
       rootPath: process.cwd(),
-      defaultBranch: 'main',
+      gitBranch: 'main',
       conflictStrategy: options.strategy as ConflictStrategy,
+      settings: {},
+      isActive: true,
       budget: options.budget
         ? { total: parseFloat(options.budget), spent: 0, currency: 'USD', alertThreshold: 80 }
         : undefined,
