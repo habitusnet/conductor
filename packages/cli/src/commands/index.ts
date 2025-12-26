@@ -5,6 +5,8 @@ import chalk from 'chalk';
 import { SQLiteStateStore } from '@conductor/state';
 import { createAgentProfile, DEFAULT_AGENT_PROFILES } from '@conductor/core';
 import type { ConflictStrategy, TaskPriority } from '@conductor/core';
+import { AgentRunner, SandboxManager } from '@conductor/e2b-runner';
+import type { AgentRunnerType } from '@conductor/e2b-runner';
 
 export const program = new Command();
 
@@ -400,6 +402,414 @@ program
     console.log(
       `  CONDUCTOR_PROJECT=${projectId} npx @conductor/mcp-server`
     );
+  });
+
+// ============================================================================
+// E2B Sandbox Commands
+// ============================================================================
+
+// Singleton instances for sandbox management
+let sandboxManager: SandboxManager | null = null;
+let agentRunner: AgentRunner | null = null;
+
+function getSandboxManager(): SandboxManager {
+  if (!sandboxManager) {
+    sandboxManager = new SandboxManager({
+      onEvent: (event) => {
+        const timestamp = event.timestamp.toLocaleTimeString();
+        switch (event.type) {
+          case 'sandbox:created':
+            console.log(chalk.dim(`[${timestamp}] Sandbox creating...`));
+            break;
+          case 'sandbox:started':
+            console.log(chalk.green(`[${timestamp}] Sandbox ${event.sandboxId} started`));
+            break;
+          case 'sandbox:stopped':
+            console.log(chalk.yellow(`[${timestamp}] Sandbox ${event.sandboxId} stopped`));
+            break;
+          case 'sandbox:failed':
+            console.log(chalk.red(`[${timestamp}] Sandbox failed: ${event.data?.['error']}`));
+            break;
+          case 'sandbox:timeout':
+            console.log(chalk.red(`[${timestamp}] Sandbox ${event.sandboxId} timed out`));
+            break;
+        }
+      },
+    });
+  }
+  return sandboxManager;
+}
+
+function getAgentRunner(): AgentRunner {
+  if (!agentRunner) {
+    agentRunner = new AgentRunner({
+      onEvent: (event) => {
+        const timestamp = event.timestamp.toLocaleTimeString();
+        console.log(chalk.dim(`[${timestamp}] ${event.type}: ${event.sandboxId}`));
+      },
+    });
+  }
+  return agentRunner;
+}
+
+const sandboxCmd = program
+  .command('sandbox')
+  .description('Manage E2B sandboxes for agent execution');
+
+sandboxCmd
+  .command('create')
+  .description('Create a new E2B sandbox')
+  .requiredOption('-a, --agent <agentId>', 'Agent ID')
+  .option('-t, --template <template>', 'E2B template (default: base)', 'base')
+  .option('--timeout <seconds>', 'Sandbox timeout in seconds', '300')
+  .action(async (options) => {
+    const store = getStore();
+    const projectId = findProject(store);
+    if (!projectId) {
+      console.error(chalk.red('Error: Not in a Conductor project.'));
+      process.exit(1);
+    }
+
+    console.log(chalk.dim('Creating E2B sandbox...'));
+
+    try {
+      const manager = getSandboxManager();
+      const instance = await manager.createSandbox(options.agent, projectId, {
+        template: options.template,
+        timeout: parseInt(options.timeout),
+      });
+
+      console.log(chalk.green(`\n✓ Sandbox created`));
+      console.log(`  ID: ${instance.id}`);
+      console.log(`  Agent: ${instance.agentId}`);
+      console.log(`  Template: ${instance.template}`);
+      console.log(`  Status: ${instance.status}`);
+      console.log();
+      console.log(chalk.dim('Run commands with:'));
+      console.log(chalk.dim(`  conductor sandbox exec ${instance.id} "ls -la"`));
+    } catch (error) {
+      console.error(chalk.red(`Failed to create sandbox: ${error}`));
+      process.exit(1);
+    }
+  });
+
+sandboxCmd
+  .command('list')
+  .description('List running sandboxes')
+  .option('-s, --status <status>', 'Filter by status (running, stopped, failed, timeout)')
+  .option('-a, --agent <agentId>', 'Filter by agent ID')
+  .action((options) => {
+    const manager = getSandboxManager();
+    const instances = manager.listInstances({
+      status: options.status,
+      agentId: options.agent,
+    });
+
+    if (instances.length === 0) {
+      console.log(chalk.dim('No sandboxes found.'));
+      return;
+    }
+
+    console.log(chalk.bold(`\nSandboxes (${instances.length}):\n`));
+
+    for (const instance of instances) {
+      const statusColor =
+        instance.status === 'running'
+          ? chalk.green
+          : instance.status === 'stopped'
+            ? chalk.gray
+            : chalk.red;
+
+      console.log(`  ${chalk.bold(instance.id)}`);
+      console.log(`    Agent: ${instance.agentId}`);
+      console.log(`    Status: ${statusColor(instance.status)}`);
+      console.log(`    Template: ${instance.template}`);
+      console.log(`    Started: ${instance.startedAt.toLocaleString()}`);
+      console.log(`    Last Activity: ${instance.lastActivityAt.toLocaleString()}`);
+      console.log();
+    }
+  });
+
+sandboxCmd
+  .command('exec <sandboxId> <command>')
+  .description('Execute a command in a sandbox')
+  .option('--cwd <directory>', 'Working directory')
+  .option('--timeout <seconds>', 'Command timeout in seconds', '60')
+  .action(async (sandboxId, command, options) => {
+    try {
+      const manager = getSandboxManager();
+      const result = await manager.executeCommand(sandboxId, command, {
+        cwd: options.cwd,
+        timeout: parseInt(options.timeout),
+      });
+
+      if (result.stdout) {
+        console.log(result.stdout);
+      }
+      if (result.stderr) {
+        console.error(chalk.yellow(result.stderr));
+      }
+
+      if (result.exitCode !== 0) {
+        console.log(chalk.red(`\nExit code: ${result.exitCode}`));
+        process.exit(result.exitCode);
+      }
+    } catch (error) {
+      console.error(chalk.red(`Failed to execute command: ${error}`));
+      process.exit(1);
+    }
+  });
+
+sandboxCmd
+  .command('stop <sandboxId>')
+  .description('Stop a running sandbox')
+  .action(async (sandboxId) => {
+    try {
+      const manager = getSandboxManager();
+      await manager.stopSandbox(sandboxId);
+      console.log(chalk.green(`✓ Sandbox ${sandboxId} stopped`));
+    } catch (error) {
+      console.error(chalk.red(`Failed to stop sandbox: ${error}`));
+      process.exit(1);
+    }
+  });
+
+sandboxCmd
+  .command('stop-all')
+  .description('Stop all running sandboxes')
+  .action(async () => {
+    const manager = getSandboxManager();
+    const running = manager.listInstances({ status: 'running' });
+
+    if (running.length === 0) {
+      console.log(chalk.dim('No running sandboxes to stop.'));
+      return;
+    }
+
+    console.log(chalk.dim(`Stopping ${running.length} sandbox(es)...`));
+    await manager.stopAll();
+    console.log(chalk.green(`✓ All sandboxes stopped`));
+  });
+
+sandboxCmd
+  .command('stats')
+  .description('Show sandbox statistics')
+  .action(() => {
+    const manager = getSandboxManager();
+    const stats = manager.getStats();
+
+    console.log(chalk.bold('\nSandbox Statistics:\n'));
+    console.log(`  Total: ${stats.total}`);
+    console.log(`  ${chalk.green('Running')}: ${stats.running}`);
+    console.log(`  ${chalk.gray('Stopped')}: ${stats.stopped}`);
+    console.log(`  ${chalk.red('Failed')}: ${stats.failed}`);
+    console.log(`  ${chalk.yellow('Timeout')}: ${stats.timeout}`);
+  });
+
+// ============================================================================
+// Agent Spawn Commands (E2B-based)
+// ============================================================================
+
+const spawnCmd = program
+  .command('spawn')
+  .description('Spawn agents in E2B sandboxes');
+
+spawnCmd
+  .command('agent')
+  .description('Spawn an agent in an E2B sandbox')
+  .requiredOption('-i, --id <agentId>', 'Agent ID')
+  .requiredOption('-t, --type <type>', 'Agent type (claude-code, aider, custom)')
+  .option('-r, --repo <gitRepo>', 'Git repository to clone')
+  .option('-b, --branch <branch>', 'Git branch to checkout')
+  .option('-m, --mcp <url>', 'MCP server URL')
+  .option('-w, --workdir <path>', 'Working directory in sandbox', '/home/user/workspace')
+  .option('--timeout <seconds>', 'Sandbox timeout in seconds', '300')
+  .option('--run', 'Run agent immediately (wait for completion)')
+  .action(async (options) => {
+    const store = getStore();
+    const projectId = findProject(store);
+    if (!projectId) {
+      console.error(chalk.red('Error: Not in a Conductor project.'));
+      process.exit(1);
+    }
+
+    const agentType = options.type as AgentRunnerType;
+    if (!['claude-code', 'aider', 'custom'].includes(agentType)) {
+      console.error(chalk.red(`Invalid agent type: ${options.type}`));
+      console.log(chalk.dim('Valid types: claude-code, aider, custom'));
+      process.exit(1);
+    }
+
+    const mcpUrl = options.mcp || process.env['CONDUCTOR_MCP_URL'] || 'http://localhost:3001';
+
+    console.log(chalk.dim(`Spawning ${options.type} agent...`));
+
+    try {
+      const runner = getAgentRunner();
+
+      if (options.run) {
+        // Run agent and wait for completion
+        console.log(chalk.dim('Running agent (waiting for completion)...'));
+        const result = await runner.runAgent({
+          type: agentType,
+          agentId: options.id,
+          projectId,
+          mcpServerUrl: mcpUrl,
+          gitRepo: options.repo,
+          gitBranch: options.branch,
+          workDir: options.workdir,
+          sandbox: {
+            timeout: parseInt(options.timeout),
+          },
+        });
+
+        if (result.success) {
+          console.log(chalk.green(`\n✓ Agent completed successfully`));
+          console.log(`  Duration: ${(result.duration / 1000).toFixed(1)}s`);
+          if (result.stdout) {
+            console.log(chalk.dim('\nOutput:'));
+            console.log(result.stdout);
+          }
+        } else {
+          console.log(chalk.red(`\n✗ Agent failed`));
+          console.log(`  Exit code: ${result.exitCode || 'N/A'}`);
+          if (result.error) {
+            console.log(`  Error: ${result.error}`);
+          }
+          if (result.stderr) {
+            console.log(chalk.yellow('\nStderr:'));
+            console.log(result.stderr);
+          }
+          process.exit(1);
+        }
+      } else {
+        // Start agent without waiting
+        const instance = await runner.startAgent({
+          type: agentType,
+          agentId: options.id,
+          projectId,
+          mcpServerUrl: mcpUrl,
+          gitRepo: options.repo,
+          gitBranch: options.branch,
+          workDir: options.workdir,
+          sandbox: {
+            timeout: parseInt(options.timeout),
+          },
+        });
+
+        console.log(chalk.green(`\n✓ Agent spawned`));
+        console.log(`  Sandbox ID: ${instance.id}`);
+        console.log(`  Agent ID: ${options.id}`);
+        console.log(`  Type: ${options.type}`);
+        console.log(`  Status: ${instance.status}`);
+        console.log();
+        console.log(chalk.dim('Monitor with:'));
+        console.log(chalk.dim(`  conductor spawn status ${options.id}`));
+        console.log(chalk.dim('Stop with:'));
+        console.log(chalk.dim(`  conductor spawn stop ${options.id}`));
+      }
+    } catch (error) {
+      console.error(chalk.red(`Failed to spawn agent: ${error}`));
+      process.exit(1);
+    }
+  });
+
+spawnCmd
+  .command('status [agentId]')
+  .description('Show status of spawned agents')
+  .action((agentId) => {
+    const runner = getAgentRunner();
+
+    if (agentId) {
+      const info = runner.getRunningAgent(agentId);
+      if (!info) {
+        console.log(chalk.dim(`Agent ${agentId} is not running.`));
+        return;
+      }
+
+      console.log(chalk.bold(`\nAgent: ${agentId}\n`));
+      console.log(`  Sandbox ID: ${info.sandboxId}`);
+      console.log(`  Status: ${chalk.green(info.instance.status)}`);
+      console.log(`  Started: ${info.startTime.toLocaleString()}`);
+      console.log(`  Last Activity: ${info.instance.lastActivityAt.toLocaleString()}`);
+    } else {
+      const agents = runner.listRunningAgents();
+
+      if (agents.length === 0) {
+        console.log(chalk.dim('No agents currently running.'));
+        return;
+      }
+
+      console.log(chalk.bold(`\nRunning Agents (${agents.length}):\n`));
+      for (const agent of agents) {
+        const runtime = Math.floor((Date.now() - agent.startTime.getTime()) / 1000);
+        console.log(`  ${chalk.bold(agent.agentId)}`);
+        console.log(`    Sandbox: ${agent.sandboxId}`);
+        console.log(`    Running for: ${runtime}s`);
+        console.log();
+      }
+    }
+  });
+
+spawnCmd
+  .command('stop <agentId>')
+  .description('Stop a running agent')
+  .action(async (agentId) => {
+    try {
+      const runner = getAgentRunner();
+      await runner.stopAgent(agentId);
+      console.log(chalk.green(`✓ Agent ${agentId} stopped`));
+    } catch (error) {
+      console.error(chalk.red(`Failed to stop agent: ${error}`));
+      process.exit(1);
+    }
+  });
+
+spawnCmd
+  .command('stop-all')
+  .description('Stop all running agents')
+  .action(async () => {
+    const runner = getAgentRunner();
+    const agents = runner.listRunningAgents();
+
+    if (agents.length === 0) {
+      console.log(chalk.dim('No running agents to stop.'));
+      return;
+    }
+
+    console.log(chalk.dim(`Stopping ${agents.length} agent(s)...`));
+    await runner.stopAllAgents();
+    console.log(chalk.green(`✓ All agents stopped`));
+  });
+
+spawnCmd
+  .command('exec <agentId> <command>')
+  .description('Execute a command in a running agent sandbox')
+  .option('--cwd <directory>', 'Working directory')
+  .option('--timeout <seconds>', 'Command timeout in seconds', '60')
+  .action(async (agentId, command, options) => {
+    try {
+      const runner = getAgentRunner();
+      const result = await runner.executeInAgent(agentId, command, {
+        cwd: options.cwd,
+        timeout: parseInt(options.timeout),
+      });
+
+      if (result.stdout) {
+        console.log(result.stdout);
+      }
+      if (result.stderr) {
+        console.error(chalk.yellow(result.stderr));
+      }
+
+      if (result.exitCode !== 0) {
+        console.log(chalk.red(`\nExit code: ${result.exitCode}`));
+        process.exit(result.exitCode);
+      }
+    } catch (error) {
+      console.error(chalk.red(`Failed to execute command: ${error}`));
+      process.exit(1);
+    }
   });
 
 export default program;

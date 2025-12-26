@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@conductor/core": "*",
+    "@conductor/e2b-runner": "*",
     "@conductor/state": "*",
     "chalk": "^5.4.1",
     "commander": "^12.1.0",

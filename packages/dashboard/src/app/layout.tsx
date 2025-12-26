@@ -47,6 +47,12 @@ export default function RootLayout({
                 >
                   Costs
                 </a>
+                <a
+                  href="/sandboxes"
+                  className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                >
+                  Sandboxes
+                </a>
               </div>
             </div>
           </div>

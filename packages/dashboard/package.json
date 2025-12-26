@@ -23,6 +23,7 @@
     "clean": "rm -rf .next .vercel .firebase"
   },
   "dependencies": {
+    "@conductor/e2b-runner": "*",
     "@conductor/state": "*",
     "firebase-admin": "^13.0.2",
     "next": "^15.1.0",
