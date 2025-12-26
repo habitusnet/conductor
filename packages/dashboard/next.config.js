@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['@conductor/core', '@conductor/state'],
+  output: 'standalone',
 };
 
 module.exports = nextConfig;
