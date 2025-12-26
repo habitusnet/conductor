@@ -1,0 +1,80 @@
+# Conductor Project Configuration
+# This file defines project settings for multi-agent orchestration
+
+# Project metadata
+project:
+  name: "My Project"
+  slug: "my-project"
+  description: "Project description"
+
+# Git repository settings
+git:
+  remote: "https://github.com/org/repo.git"
+  branch: "main"
+  auto_sync: true
+
+# Conflict resolution strategy
+# Options: lock, merge, zone, review
+conflict_strategy: lock
+
+# Budget settings (optional)
+budget:
+  total: 100.00  # USD
+  alert_threshold: 80  # Percentage
+
+# Agent configurations
+agents:
+  claude:
+    enabled: true
+    role: lead  # lead, contributor, reviewer, observer
+    instructions_file: "CLAUDE.md"
+    allowed_paths:
+      - "src/**/*"
+      - "tests/**/*"
+    denied_paths:
+      - "*.env*"
+      - "secrets/**/*"
+    token_budget: 50000
+
+  gemini:
+    enabled: true
+    role: contributor
+    instructions_file: "GEMINI.md"
+    allowed_paths:
+      - "src/**/*"
+      - "docs/**/*"
+    denied_paths:
+      - "*.env*"
+
+  codex:
+    enabled: false
+    role: reviewer
+
+# Task defaults
+tasks:
+  default_priority: medium
+  auto_assign: true  # Automatically assign based on agent capabilities
+  require_review: false  # Require review before task completion
+
+# Notifications
+notifications:
+  slack:
+    enabled: false
+    webhook_url: ""
+    events:
+      - task:completed
+      - task:failed
+      - conflict:detected
+
+  discord:
+    enabled: false
+    webhook_url: ""
+
+# Custom hooks
+hooks:
+  on_task_complete:
+    - "npm run test"
+    - "npm run lint"
+
+  on_conflict_detected:
+    - "notify-team"

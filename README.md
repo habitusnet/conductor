@@ -1,138 +1,206 @@
 # Conductor
 
-Multi-LLM orchestration framework for autonomous agent coordination.
+**Multi-LLM Orchestration Platform for Autonomous Agent Coordination**
+
+Conductor is a project-agnostic orchestration platform that enables multiple LLM agents (Claude, Gemini, GPT-4, Codex, etc.) to work autonomously and collaboratively on shared codebases.
 
 ## Overview
 
-Conductor enables multiple LLM agents (Claude, Gemini, Codex, etc.) to work autonomously on shared codebases with:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      CONDUCTOR PLATFORM                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
+│  │Organization │───▶│   Project   │───▶│    Agent    │             │
+│  │  (Account)  │    │  (Repo Link)│    │  Instances  │             │
+│  └─────────────┘    └─────────────┘    └─────────────┘             │
+│         │                  │                  │                     │
+│         ▼                  ▼                  ▼                     │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
+│  │   Billing   │    │   Custom    │    │  Heartbeat  │             │
+│  │  & Quotas   │    │Instructions │    │  & Status   │             │
+│  └─────────────┘    └─────────────┘    └─────────────┘             │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  CONNECTORS                                                          │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐            │
+│  │ GitHub │ │ Claude │ │ Gemini │ │ OpenAI │ │Webhooks│            │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘            │
+├─────────────────────────────────────────────────────────────────────┤
+│  DASHBOARD                                                           │
+│  • Portfolio view (all projects)                                    │
+│  • Project drill-down (tasks, agents, costs)                        │
+│  • Agent performance & utilization                                  │
+│  • Conflict resolution queue                                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-- **Task Management**: Claim, track, and complete tasks with priority and dependencies
-- **File Locking**: Prevent conflicts with exclusive file locks
-- **Cost Tracking**: Monitor token usage and budget across agents
-- **MCP Integration**: Native Model Context Protocol server for Claude CLI and compatible tools
-- **Real-time Dashboard**: Web-based monitoring and control
+## Key Features
+
+### Multi-Tenancy
+- **Organizations**: Account-level isolation with billing and quotas
+- **Projects**: Link any Git repository for orchestrated development
+- **Agents**: Register and manage multiple LLM agents per project
+
+### Task Orchestration
+- **Task Auction**: Agents bid on tasks based on capabilities and cost
+- **Dependency Management**: Tasks can have prerequisites and blockers
+- **Progress Tracking**: Real-time updates from working agents
+
+### Conflict Resolution
+- **File Locking**: Prevent concurrent edits to the same files
+- **Zone-based Ownership**: Assign file patterns to specific agents
+- **Merge Strategies**: Automatic or human-reviewed conflict resolution
+- **Review Queue**: Dashboard for manual intervention
+
+### Cost Management
+- **Token Tracking**: Monitor usage per agent, project, and task
+- **Budget Alerts**: Notifications at configurable thresholds
+- **Usage Reports**: Detailed breakdowns for optimization
+
+### Agent Coordination
+- **Heartbeat Monitoring**: Detect stale or crashed agents
+- **Auto-reassignment**: Recover from agent failures
+- **Custom Instructions**: Per-project CLAUDE.md, GEMINI.md files
+
+## Package Structure
+
+```
+conductor/
+├── packages/
+│   ├── core/           # Type definitions and shared logic
+│   ├── db/             # Database layer (SQLite + PostgreSQL)
+│   ├── mcp-server/     # MCP tools for LLM agents
+│   ├── connectors/     # External service integrations
+│   ├── cli/            # Command-line interface
+│   └── dashboard/      # Web-based oversight UI (coming soon)
+├── templates/
+│   ├── CLAUDE.md       # Claude agent instructions
+│   ├── GEMINI.md       # Gemini agent instructions
+│   └── project.yaml    # Project configuration schema
+└── apps/
+    └── dashboard/      # Next.js dashboard app (coming soon)
+```
 
 ## Quick Start
 
+### 1. Install CLI
+
 ```bash
-# Install globally
 npm install -g @conductor/cli
-
-# Initialize in your project
-cd your-project
-conductor init
-
-# Register agents
-conductor agent:register -i claude
-conductor agent:register -i gemini
-conductor agent:register -i codex
-
-# Add tasks
-conductor task:add -t "Implement user authentication" --files src/auth/*.ts
-conductor task:add -t "Write unit tests" --deps <auth-task-id>
-
-# Check status
-conductor status
 ```
 
-## Packages
+### 2. Initialize a Project
 
-| Package | Description |
-|---------|-------------|
-| `@conductor/core` | Core types and utilities |
-| `@conductor/state` | SQLite state management |
-| `@conductor/mcp-server` | MCP protocol server |
-| `@conductor/cli` | Command-line interface |
-| `@conductor/dashboard` | Web dashboard (Next.js) |
+```bash
+cd your-project
+conductor init
+```
 
-## MCP Integration
+This creates a `.conductor/` directory with:
+- `project.yaml` - Project configuration
+- `CLAUDE.md` - Claude agent instructions
+- `GEMINI.md` - Gemini agent instructions
 
-Add Conductor to your Claude CLI configuration:
+### 3. Configure Agents
 
+Edit `.conductor/project.yaml`:
+
+```yaml
+agents:
+  claude:
+    enabled: true
+    role: lead
+    allowed_paths: ["src/**/*"]
+
+  gemini:
+    enabled: true
+    role: contributor
+    allowed_paths: ["docs/**/*"]
+```
+
+### 4. Start the MCP Server
+
+```bash
+conductor serve
+```
+
+### 5. Connect Your Agents
+
+Add to Claude's MCP configuration:
 ```json
 {
   "mcpServers": {
     "conductor": {
-      "command": "npx",
-      "args": ["@conductor/mcp-server"],
-      "env": {
-        "CONDUCTOR_PROJECT": "<your-project-id>",
-        "CONDUCTOR_DB": "./conductor.db"
-      }
+      "command": "conductor",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-### Available MCP Tools
+## MCP Tools
+
+Conductor exposes these tools to connected agents:
 
 | Tool | Description |
 |------|-------------|
-| `conductor_list_tasks` | List available tasks |
-| `conductor_claim_task` | Claim a task to work on |
-| `conductor_update_task` | Update task status |
-| `conductor_lock_file` | Acquire file lock |
+| `conductor_list_tasks` | List available tasks for the project |
+| `conductor_claim_task` | Claim a pending task |
+| `conductor_start_task` | Mark task as in progress |
+| `conductor_update_progress` | Report progress on current task |
+| `conductor_complete_task` | Mark task as completed with result |
+| `conductor_fail_task` | Report task failure with error |
+| `conductor_lock_file` | Acquire exclusive lock on a file |
 | `conductor_unlock_file` | Release file lock |
-| `conductor_check_locks` | Check file lock status |
-| `conductor_report_usage` | Report token usage |
-| `conductor_get_budget` | Check budget status |
-| `conductor_heartbeat` | Send agent heartbeat |
-| `conductor_list_agents` | List registered agents |
+| `conductor_check_conflicts` | Check for active conflicts |
+| `conductor_heartbeat` | Send keepalive signal |
 
 ## CLI Commands
 
 ```bash
-# Project
+# Project Management
 conductor init              # Initialize project
 conductor status            # Show project status
+conductor sync              # Sync with remote repository
 
-# Agents
+# Agent Management
 conductor agent:register    # Register an agent
 conductor agent:list        # List agents
 conductor agent:profiles    # Show available profiles
 
-# Tasks
+# Task Management
 conductor task:add          # Add a task
 conductor task:list         # List tasks
 conductor task:show <id>    # Show task details
 
 # Server
 conductor serve             # Start MCP server
+conductor mcp               # Run as MCP subprocess
 ```
 
-## Architecture
+## Configuration
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    CONDUCTOR CORE                        │
-├─────────────────────────────────────────────────────────┤
-│  Agent Gateway (MCP) │ Task Manager │ Conflict Resolver │
-│                      │              │                    │
-│  ┌────────────────── State Manager (SQLite) ──────────┐ │
-│  │                                                     │ │
-│  │  Cost Manager  │  File Locks   │  Event Logger     │ │
-└──┴─────────────────────────────────────────────────────┴─┘
-         │                 │                 │
-    Claude CLI        Gemini API        Codex API
-```
-
-## Development
+### Environment Variables
 
 ```bash
-# Clone and install
-git clone https://github.com/habitusnet/conductor.git
-cd conductor
-npm install
+# Database (SQLite for local, Postgres for production)
+CONDUCTOR_DB_PATH=./conductor.db
+CONDUCTOR_DATABASE_URL=postgresql://...
 
-# Build all packages
-npm run build
+# API Keys (for LLM connectors)
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_AI_API_KEY=...
+OPENAI_API_KEY=sk-...
 
-# Run tests
-npm run test
-
-# Development mode
-npm run dev
+# GitHub (for repo sync)
+GITHUB_TOKEN=ghp_...
 ```
+
+### Project Configuration
+
+See `templates/project.yaml` for full configuration options.
 
 ## Conflict Resolution Strategies
 
@@ -143,17 +211,70 @@ npm run dev
 | `zone` | Assign file ownership zones |
 | `review` | Queue for human review |
 
-## Cost Tracking
-
-Conductor tracks token usage and costs per agent:
+## Development
 
 ```bash
-# Check budget
-conductor status
+# Install dependencies
+npm install
 
-# View detailed costs in dashboard
-open http://localhost:3100/costs
+# Build all packages
+npm run build
+
+# Run tests
+npm run test
+
+# Start development
+npm run dev
 ```
+
+## Architecture
+
+### Database
+
+Conductor supports two database backends:
+- **SQLite**: Local development, single-machine deployments
+- **PostgreSQL (Neon)**: Production, multi-region, serverless
+
+Schema includes:
+- `organizations` - Multi-tenant accounts
+- `projects` - Linked repositories
+- `agents` - Registered LLM agents
+- `project_agents` - Per-project agent configuration
+- `tasks` - Work items with status, priority, assignments
+- `task_activities` - Audit log of task changes
+- `file_locks` - Active file locks
+- `file_conflicts` - Conflict records
+- `cost_events` - Token usage tracking
+
+### MCP Server
+
+The MCP server runs as a local process and exposes Conductor's functionality to connected LLM agents. It handles:
+- Tool registration and execution
+- Database operations
+- File lock management
+- Heartbeat processing
+
+### Dashboard (Coming Soon)
+
+Web-based UI for:
+- Project portfolio overview
+- Real-time agent status
+- Task management
+- Conflict resolution queue
+- Cost analytics
+
+## Roadmap
+
+- [x] Core types and schemas
+- [x] SQLite + PostgreSQL database layer
+- [x] MCP server with basic tools
+- [x] GitHub connector
+- [x] LLM connectors (Claude, Gemini, OpenAI)
+- [ ] Dashboard UI
+- [ ] Real-time notifications (WebSocket)
+- [ ] Advanced conflict resolution
+- [ ] Agent capability matching
+- [ ] Cost optimization recommendations
 
 ## License
 
@@ -161,4 +282,4 @@ MIT
 
 ## Contributing
 
-Contributions welcome! Please read our contributing guidelines.
+Contributions welcome! Please read our contributing guidelines before submitting PRs.
