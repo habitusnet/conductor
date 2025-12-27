@@ -28,7 +28,7 @@ describe('TaskRepository', () => {
 
   describe('create', () => {
     it('should create task with all fields', async () => {
-      const task = {
+      const task: any = {
         id: 'task-123',
         projectId: 'proj-123',
         parentId: 'task-parent',
@@ -71,7 +71,7 @@ describe('TaskRepository', () => {
     });
 
     it('should create task with default values', async () => {
-      const task = {
+      const task: any = {
         id: 'task-456',
         projectId: 'proj-123',
         title: 'Minimal Task',
@@ -92,7 +92,7 @@ describe('TaskRepository', () => {
     });
 
     it('should log creation activity', async () => {
-      const task = {
+      const task: any = {
         id: 'task-789',
         projectId: 'proj-123',
         title: 'Task with Activity',

@@ -22,7 +22,7 @@ describe('OrganizationRepository', () => {
 
   describe('create', () => {
     it('should create organization with all fields', async () => {
-      const org = {
+      const org: any = {
         id: 'org-123',
         name: 'Test Org',
         slug: 'test-org',
@@ -51,7 +51,7 @@ describe('OrganizationRepository', () => {
     });
 
     it('should create organization with default values', async () => {
-      const org = {
+      const org: any = {
         id: 'org-456',
         name: 'Minimal Org',
         slug: 'minimal-org',
@@ -161,7 +161,7 @@ describe('OrganizationRepository', () => {
 
   describe('addMember', () => {
     it('should add member to organization', async () => {
-      const member = {
+      const member: any = {
         id: 'member-123',
         organizationId: 'org-123',
         userId: 'user-456',
@@ -183,7 +183,7 @@ describe('OrganizationRepository', () => {
     });
 
     it('should use default member role', async () => {
-      const member = {
+      const member: any = {
         id: 'member-456',
         organizationId: 'org-123',
         userId: 'user-789',

@@ -22,7 +22,7 @@ describe('ProjectRepository', () => {
 
   describe('create', () => {
     it('should create project with all fields', async () => {
-      const project = {
+      const project: any = {
         id: 'proj-123',
         organizationId: 'org-123',
         name: 'Test Project',
@@ -62,7 +62,7 @@ describe('ProjectRepository', () => {
     });
 
     it('should create project with default values', async () => {
-      const project = {
+      const project: any = {
         id: 'proj-456',
         organizationId: 'org-123',
         name: 'Minimal Project',
@@ -176,7 +176,7 @@ describe('ProjectRepository', () => {
       mockDb.returning.mockResolvedValue([{}]);
 
       await repo.update('proj-123', {
-        budget: { total: 2000, spent: 500, alertThreshold: 75 },
+        budget: { total: 2000, spent: 500, alertThreshold: 75, currency: 'USD' as const },
       });
 
       expect(mockDb.set).toHaveBeenCalledWith(expect.objectContaining({
@@ -199,7 +199,7 @@ describe('ProjectRepository', () => {
 
   describe('addAgent', () => {
     it('should add agent to project', async () => {
-      const binding = {
+      const binding: any = {
         id: 'binding-123',
         projectId: 'proj-123',
         agentId: 'agent-456',
@@ -233,7 +233,7 @@ describe('ProjectRepository', () => {
     });
 
     it('should add agent with default values', async () => {
-      const binding = {
+      const binding: any = {
         id: 'binding-456',
         projectId: 'proj-123',
         agentId: 'agent-789',

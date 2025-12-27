@@ -65,7 +65,7 @@ describe('AgentRepository', () => {
     });
 
     it('should create agent with default values', async () => {
-      const agent = {
+      const agent: any = {
         id: 'agent-456',
         name: 'GPT-4',
         provider: 'openai' as const,
@@ -195,7 +195,7 @@ describe('AgentRepository', () => {
     });
 
     it('should register instance with default status', async () => {
-      const instance = {
+      const instance: any = {
         id: 'instance-456',
         agentId: 'agent-123',
         projectId: 'proj-123',

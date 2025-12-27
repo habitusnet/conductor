@@ -105,7 +105,7 @@ describe('Database Connection Functions', () => {
 
     it('should create database with provided config', async () => {
       // Re-import to get fresh module state
-      const { getDb: freshGetDb } = await import('./index');
+      const { getDb: freshGetDb } = await import('./index.js');
 
       const db = freshGetDb({ type: 'sqlite', url: './custom.db' });
 
@@ -118,7 +118,7 @@ describe('Database Connection Functions', () => {
       delete process.env['CONDUCTOR_DB_PATH'];
 
       // Re-import to get fresh module state
-      const { getDb: freshGetDb } = await import('./index');
+      const { getDb: freshGetDb } = await import('./index.js');
 
       freshGetDb();
 
@@ -132,7 +132,7 @@ describe('Database Connection Functions', () => {
       process.env['CONDUCTOR_DB_PATH'] = './env-specified.db';
 
       vi.resetModules();
-      const { getDb: freshGetDb } = await import('./index');
+      const { getDb: freshGetDb } = await import('./index.js');
 
       freshGetDb();
 
@@ -143,7 +143,7 @@ describe('Database Connection Functions', () => {
 
     it('should return cached database on subsequent calls', async () => {
       vi.resetModules();
-      const { getDb: freshGetDb } = await import('./index');
+      const { getDb: freshGetDb } = await import('./index.js');
 
       const db1 = freshGetDb();
       const db2 = freshGetDb();
