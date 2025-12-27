@@ -197,6 +197,31 @@ describe('SQLiteStateStore', () => {
         expect(retrieved!.name).toBe('Claude v2');
         expect(retrieved!.capabilities).toContain('new-cap');
       });
+
+      it('should register agent with quotaResetAt', () => {
+        const resetDate = new Date('2024-02-01T00:00:00Z');
+        const agent: AgentProfile = {
+          id: 'quota-agent',
+          name: 'Quota Agent',
+          provider: 'anthropic',
+          model: 'claude-opus-4',
+          capabilities: [],
+          costPerToken: { input: 0.01, output: 0.03 },
+          quotaLimit: 100000,
+          quotaUsed: 5000,
+          quotaResetAt: resetDate,
+          status: 'idle',
+          metadata: {},
+        };
+
+        store.registerAgent(projectId, agent);
+        const retrieved = store.getAgent('quota-agent');
+
+        expect(retrieved).not.toBeNull();
+        expect(retrieved!.quotaLimit).toBe(100000);
+        expect(retrieved!.quotaUsed).toBe(5000);
+        expect(retrieved!.quotaResetAt).toEqual(resetDate);
+      });
     });
 
     describe('getAgent', () => {
@@ -457,6 +482,11 @@ describe('SQLiteStateStore', () => {
       it('should filter by priority', () => {
         const tasks = store.listTasks(projectId, { priority: 'high' });
         expect(tasks).toHaveLength(1);
+      });
+
+      it('should filter by multiple priorities', () => {
+        const tasks = store.listTasks(projectId, { priority: ['high', 'critical'] });
+        expect(tasks).toHaveLength(2);
       });
 
       it('should filter by assignedTo', () => {
@@ -1043,6 +1073,51 @@ describe('SQLiteStateStore', () => {
         const config = store.getOnboardingConfig(projectId);
         expect(config!.welcomeMessage).toBe('Welcome v2');
         expect(config!.currentFocus).toBe('New focus');
+      });
+
+      it('should update checkpointRules on existing config', () => {
+        store.setOnboardingConfig(projectId, { welcomeMessage: 'Initial' });
+        store.setOnboardingConfig(projectId, { checkpointRules: ['Rule 1', 'Rule 2'] });
+
+        const config = store.getOnboardingConfig(projectId);
+        expect(config!.checkpointRules).toEqual(['Rule 1', 'Rule 2']);
+      });
+
+      it('should update checkpointEveryNTasks on existing config', () => {
+        store.setOnboardingConfig(projectId, { welcomeMessage: 'Initial' });
+        store.setOnboardingConfig(projectId, { checkpointEveryNTasks: 10 });
+
+        const config = store.getOnboardingConfig(projectId);
+        expect(config!.checkpointEveryNTasks).toBe(10);
+      });
+
+      it('should update agentInstructionsFiles on existing config', () => {
+        store.setOnboardingConfig(projectId, { welcomeMessage: 'Initial' });
+        store.setOnboardingConfig(projectId, {
+          agentInstructionsFiles: { claude: 'CLAUDE.md', gemini: 'GEMINI.md' },
+        });
+
+        const config = store.getOnboardingConfig(projectId);
+        expect(config!.agentInstructionsFiles).toEqual({
+          claude: 'CLAUDE.md',
+          gemini: 'GEMINI.md',
+        });
+      });
+
+      it('should update goals on existing config', () => {
+        store.setOnboardingConfig(projectId, { welcomeMessage: 'Initial' });
+        store.setOnboardingConfig(projectId, { goals: ['Goal 1', 'Goal 2', 'Goal 3'] });
+
+        const config = store.getOnboardingConfig(projectId);
+        expect(config!.goals).toEqual(['Goal 1', 'Goal 2', 'Goal 3']);
+      });
+
+      it('should update styleGuide on existing config', () => {
+        store.setOnboardingConfig(projectId, { welcomeMessage: 'Initial' });
+        store.setOnboardingConfig(projectId, { styleGuide: 'Use TypeScript strict mode' });
+
+        const config = store.getOnboardingConfig(projectId);
+        expect(config!.styleGuide).toBe('Use TypeScript strict mode');
       });
 
       it('should handle all config fields', () => {

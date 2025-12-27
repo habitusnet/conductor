@@ -14,9 +14,17 @@ vi.mock('@conductor/state', () => ({
   SQLiteStateStore: vi.fn().mockImplementation(() => mockStore),
 }));
 
+let capturedAgentRunnerOptions: any = null;
+let capturedSandboxManagerOptions: any = null;
 vi.mock('@conductor/e2b-runner', () => ({
-  SandboxManager: vi.fn().mockImplementation(() => mockSandboxManager),
-  AgentRunner: vi.fn().mockImplementation(() => mockAgentRunner),
+  SandboxManager: vi.fn().mockImplementation((options) => {
+    capturedSandboxManagerOptions = options;
+    return mockSandboxManager;
+  }),
+  AgentRunner: vi.fn().mockImplementation((options) => {
+    capturedAgentRunnerOptions = options;
+    return mockAgentRunner;
+  }),
 }));
 
 // Mock store
@@ -336,6 +344,18 @@ describe('CLI Commands', () => {
         // Verify output was called (capabilities get truncated to 5)
         expect(consoleLogSpy).toHaveBeenCalled();
       });
+
+      it('should fail when not in a project', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await expect(
+          program.parseAsync(['node', 'test', 'agent', 'list'])
+        ).rejects.toThrow('process.exit(1)');
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Not in a Conductor project')
+        );
+      });
     });
 
     describe('agent profiles', () => {
@@ -524,6 +544,18 @@ describe('CLI Commands', () => {
         await program.parseAsync(['node', 'test', 'task', 'list']);
 
         expect(consoleLogSpy).toHaveBeenCalled();
+      });
+
+      it('should fail when not in a project', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await expect(
+          program.parseAsync(['node', 'test', 'task', 'list'])
+        ).rejects.toThrow('process.exit(1)');
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Not in a Conductor project')
+        );
       });
     });
 
@@ -781,6 +813,39 @@ describe('CLI Commands', () => {
         await expect(
           program.parseAsync(['node', 'test', 'sandbox', 'create', '-a', 'claude'])
         ).rejects.toThrow('process.exit(1)');
+      });
+
+      it('should fail when not in a project', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await expect(
+          program.parseAsync(['node', 'test', 'sandbox', 'create', '-a', 'claude'])
+        ).rejects.toThrow('process.exit(1)');
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Not in a Conductor project')
+        );
+      });
+
+      it('should log events via onEvent callback', () => {
+        // The onEvent callback is captured when SandboxManager is instantiated
+        expect(capturedSandboxManagerOptions).toBeDefined();
+        expect(capturedSandboxManagerOptions.onEvent).toBeDefined();
+
+        // Test all event types
+        const events = [
+          { type: 'sandbox:created', timestamp: new Date(), sandboxId: 'sb-1' },
+          { type: 'sandbox:started', timestamp: new Date(), sandboxId: 'sb-1' },
+          { type: 'sandbox:stopped', timestamp: new Date(), sandboxId: 'sb-1' },
+          { type: 'sandbox:failed', timestamp: new Date(), sandboxId: 'sb-1', data: { error: 'test error' } },
+          { type: 'sandbox:timeout', timestamp: new Date(), sandboxId: 'sb-1' },
+        ];
+
+        for (const event of events) {
+          capturedSandboxManagerOptions.onEvent(event);
+        }
+
+        expect(consoleLogSpy).toHaveBeenCalled();
       });
     });
 
@@ -1172,6 +1237,47 @@ describe('CLI Commands', () => {
             'claude-code',
           ])
         ).rejects.toThrow('process.exit(1)');
+      });
+
+      it('should fail when not in a project', async () => {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await expect(
+          program.parseAsync([
+            'node',
+            'test',
+            'spawn',
+            'agent',
+            '-i',
+            'claude',
+            '-t',
+            'claude-code',
+          ])
+        ).rejects.toThrow('process.exit(1)');
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Not in a Conductor project')
+        );
+      });
+
+      it('should log events via onEvent callback', async () => {
+        // The onEvent callback is captured when AgentRunner is instantiated
+        // We can test it was set up correctly by checking the captured options
+        // from any previous test that initialized the agent runner
+        expect(capturedAgentRunnerOptions).toBeDefined();
+        expect(capturedAgentRunnerOptions.onEvent).toBeDefined();
+
+        const testEvent = {
+          timestamp: new Date('2024-01-01T12:00:00Z'),
+          type: 'sandbox_started',
+          sandboxId: 'sandbox-123',
+        };
+
+        capturedAgentRunnerOptions.onEvent(testEvent);
+
+        expect(consoleLogSpy).toHaveBeenCalledWith(
+          expect.stringContaining('sandbox_started')
+        );
       });
     });
 
