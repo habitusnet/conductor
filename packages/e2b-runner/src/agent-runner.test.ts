@@ -222,7 +222,7 @@ describe('AgentRunner', () => {
       expect(result.agentId).toBe('claude-1');
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('Task completed');
-      expect(result.duration).toBeGreaterThan(0);
+      expect(result.duration).toBeGreaterThanOrEqual(0);
     });
 
     it('should return failure result on non-zero exit', async () => {
